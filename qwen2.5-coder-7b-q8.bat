@@ -1,0 +1,1 @@
+llama-server --hf-repo Qwen/Qwen2.5-Coder-7B-Instruct-GGUF --hf-file qwen2.5-coder-7b-instruct-q6_k.gguf -c 2048 --gpu-layers 999 --host 0.0.0.0 --port 8080

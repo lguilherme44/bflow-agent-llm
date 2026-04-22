@@ -1,0 +1,97 @@
+import { Lang, parse } from '@ast-grep/napi';
+import { CodeLanguage, TextPatch } from '../types';
+import { detectLanguage, rangeFromOffsets } from './source';
+
+export interface StructuralSearchMatch {
+  filepath: string;
+  kind: string;
+  text: string;
+  range: TextPatch['range'];
+}
+
+export interface StructuralReplacementPlan {
+  matches: StructuralSearchMatch[];
+  patches: TextPatch[];
+  fallbackReason?: string;
+}
+
+export class AstGrepService {
+  searchInText(filepath: string, content: string, pattern: string): StructuralSearchMatch[] {
+    const language = detectLanguage(filepath);
+    const lang = this.toAstGrepLanguage(language);
+    if (!lang) {
+      return [];
+    }
+
+    const root = parse(lang, content).root();
+    return root.findAll(pattern).map((node) => ({
+      filepath,
+      kind: String(node.kind()),
+      text: node.text(),
+      range: rangeFromOffsets(content, node.range().start.index, node.range().end.index),
+    }));
+  }
+
+  createReplacementPlan(
+    filepath: string,
+    content: string,
+    pattern: string,
+    replacement: string
+  ): StructuralReplacementPlan {
+    const language = detectLanguage(filepath);
+    const lang = this.toAstGrepLanguage(language);
+    if (!lang) {
+      return {
+        matches: [],
+        patches: [],
+        fallbackReason: `ast-grep does not support ${language} in this service`,
+      };
+    }
+
+    const root = parse(lang, content).root();
+    const matches = root.findAll(pattern);
+    if (matches.length === 0) {
+      return {
+        matches: [],
+        patches: [],
+        fallbackReason: `No AST match found for pattern: ${pattern}`,
+      };
+    }
+
+    const searchMatches: StructuralSearchMatch[] = [];
+    const patches: TextPatch[] = [];
+    for (const node of matches) {
+      const edit = node.replace(replacement);
+      const range = rangeFromOffsets(content, edit.startPos, edit.endPos);
+      searchMatches.push({
+        filepath,
+        kind: String(node.kind()),
+        text: node.text(),
+        range,
+      });
+      patches.push({
+        filepath,
+        range,
+        oldText: content.slice(edit.startPos, edit.endPos),
+        newText: edit.insertedText,
+      });
+    }
+
+    return { matches: searchMatches, patches };
+  }
+
+  private toAstGrepLanguage(language: CodeLanguage): Lang | undefined {
+    switch (language) {
+      case 'typescript':
+        return Lang.TypeScript;
+      case 'tsx':
+      case 'jsx':
+        return Lang.Tsx;
+      case 'javascript':
+        return Lang.JavaScript;
+      case 'json':
+      case 'unknown':
+        return undefined;
+    }
+  }
+}

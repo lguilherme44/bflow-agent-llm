@@ -1,0 +1,6 @@
+id: sync-to-async-function
+language: TypeScript
+rule:
+  pattern: function $NAME($$$ARGS) { $$$BODY }
+fix: async function $NAME($$$ARGS) { $$$BODY }
+message: Convert a function declaration to async while preserving parameters and body.

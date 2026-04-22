@@ -1,0 +1,25 @@
+name: Local AI Config
+version: 1.0.0
+schema: v1
+
+models:
+  - name: Local LLM
+    provider: openai
+    model: local-model
+    apiBase: http://localhost:3000
+    apiKey: none
+
+tabAutocompleteModel:
+  name: Local LLM
+  provider: openai
+  model: local-model
+  apiBase: http://localhost:3000
+  apiKey: none
+
+context:
+  - provider: codebase
+
+systemMessage: |
+  You are a senior software engineer.
+  Write clean, production-ready code.
+  Be concise.

@@ -1,0 +1,1 @@
+llama-server -hf unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_XL --temp 1.0 --top-p 0.95 --top-k 20 --min-p 0.00 --chat-template-kwargs "{\"enable_thinking\":true}"

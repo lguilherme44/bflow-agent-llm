@@ -1,0 +1,6 @@
+id: react-prop-rename
+language: Tsx
+rule:
+  pattern: <$COMPONENT $OLD={$VALUE} $$$REST />
+fix: <$COMPONENT $NEW={$VALUE} $$$REST />
+message: Rename a JSX prop in self-closing component usage.

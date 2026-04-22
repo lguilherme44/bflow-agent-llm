@@ -1,0 +1,6 @@
+id: rename-import-source
+language: TypeScript
+rule:
+  pattern: import $$$IMPORTS from "$OLD"
+fix: import $$$IMPORTS from "$NEW"
+message: Rename an import source with ast-grep metavariables.
