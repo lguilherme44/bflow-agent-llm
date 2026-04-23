@@ -57,7 +57,11 @@ export class ResearchAgent {
       registry: researchRegistry,
       llmConfig: {
         ...config.llmConfig,
-        systemPrompt: config.llmConfig?.systemPrompt + '\n\nYou are a Research Agent. Your goal is to use read-only tools to analyze the workspace, understand the user request, and finally call `submit_research_brief`. Do NOT write code or modify files.'
+        systemPrompt: (config.llmConfig?.systemPrompt || '') + 
+          `\n\nVocê é um Agente de Pesquisa. Sua missão é ler arquivos e entender o contexto para responder à tarefa.` +
+          `\nREGRAS CRÍTICAS:` +
+          `\n1. FALE APENAS EM PORTUGUÊS (PT-BR).` +
+          `\n2. Use a ferramenta 'submit_research_brief' para finalizar sua fase.`
       }
     });
   }

@@ -16,24 +16,19 @@ interface DisplayMessage {
 
 const MessageRow = memo(({ m, width }: { m: DisplayMessage; width: number }) => {
   const cleanContent = m.content.replace(/\r?\n|\r/g, ' ').replace(/\s+/g, ' ').trim();
-  
   const timestamp = m.timestamp.padEnd(10);
-  const role = `[${m.role.toUpperCase()}]`.padEnd(13);
-  
-  // Calculamos o espaço restante e truncamos o conteúdo
-  const availableWidth = width - timestamp.length - role.length - 2;
-  const truncatedContent = cleanContent.length > availableWidth 
-    ? cleanContent.slice(0, availableWidth - 3) + '...' 
-    : cleanContent;
-
-  // Renderizamos como uma única string para evitar sobreposição de caracteres no Windows
-  const line = `${timestamp}${role} ${truncatedContent}`.padEnd(width);
+  const role = `[${m.role.toUpperCase()}]`.padEnd(12);
+  const contentWidth = width - timestamp.length - role.length - 2;
 
   return (
-    <Box height={1} width={width}>
-      <Text color={m.role === 'system' ? 'blue' : m.role === 'assistant' ? 'green' : 'white'}>
-        {line}
+    <Box width={width} height={1}>
+      <Text color="gray">{timestamp}</Text>
+      <Text bold color={m.role === 'system' ? 'blue' : m.role === 'assistant' ? 'green' : 'white'}>
+        {role}
       </Text>
+      <Box width={contentWidth}>
+        <Text color="white" wrap="truncate-end">{cleanContent}</Text>
+      </Box>
     </Box>
   );
 });
@@ -49,6 +44,7 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
   const [currentPhase, setCurrentPhase] = useState<string>('Research');
   const [usage, setUsage] = useState({ totalTokens: 0 });
   const [error, setError] = useState<string | null>(null);
+  const [finalResult, setFinalResult] = useState<string | null>(null);
 
   const formatContent = useMemo(() => (content: string): string => {
     try {
@@ -56,8 +52,7 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
         const parsed = JSON.parse(content);
         if (parsed.thought) return `Pensando: ${parsed.thought}`;
         if (parsed.action) return `Ação: ${parsed.action}`;
-        if (parsed.summary) return `Resultado: ${parsed.summary}`;
-        // Removido o 'final' para evitar alucinação do agente
+        if (parsed.summary) return parsed.summary;
       }
       return content;
     } catch {
@@ -78,16 +73,25 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
         case 'phase_complete':
           if (event.phase === 'Finalized') {
             setStatus('completed');
-            setCurrentPhase('Finalized');
+            setCurrentPhase('Done');
           }
           break;
         case 'message_added':
           const now = new Date().toLocaleTimeString().split(' ')[0];
-          setMessages(prev => [...prev, { 
-            role: event.role, 
-            content: formatContent(event.content),
-            timestamp: now
-          }].slice(-15));
+          const formatted = formatContent(event.content);
+          
+          if (formatted.startsWith('RESUMO FINAL: ')) {
+            setFinalResult(formatted.replace('RESUMO FINAL: ', ''));
+          }
+
+          setMessages(prev => {
+            const next = [...prev, { 
+              role: event.role, 
+              content: formatted,
+              timestamp: now
+            }];
+            return next.slice(-12);
+          });
           break;
         case 'usage_update':
           setUsage({ totalTokens: event.usage.totalTokens });
@@ -101,11 +105,7 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
 
     const runAgent = async () => {
       try {
-        const { state } = await orchestrator.run(initialTask);
-        if (isMounted) {
-          if (state.status === 'completed') setStatus('completed');
-          else if (state.status === 'error') setStatus('error');
-        }
+        await orchestrator.run(initialTask);
       } catch (err: any) {
         if (isMounted) {
           setStatus('error');
@@ -122,16 +122,16 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
 
   return (
     <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} width={terminalWidth + 4} height={26}>
-      <Box marginBottom={1} justifyContent="center">
+      <Box marginBottom={1} justifyContent="center" height={1}>
         <Text bold color="cyan" inverse> AGENT OS v1.0 </Text>
       </Box>
 
-      <Box marginBottom={1}>
+      <Box marginBottom={1} width={terminalWidth} height={1}>
         <Text bold>Tarefa: </Text>
-        <Text italic color="white">{initialTask.slice(0, terminalWidth - 10)}</Text>
+        <Text italic color="white" wrap="truncate-end">{initialTask}</Text>
       </Box>
 
-      <Box marginBottom={1} justifyContent="space-between">
+      <Box marginBottom={1} justifyContent="space-between" height={1}>
         <Box>
           <Text bold>STATUS: </Text>
           {status === 'running' && <Text color="yellow">RUNNING</Text>}
@@ -152,16 +152,25 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
 
       <Text color="gray">{horizontalLine}</Text>
 
-      {status === 'error' && error && (
-        <Box borderStyle="single" borderColor="red" paddingX={1} marginBottom={1} height={4} flexDirection="column">
-          <Text color="red" bold>CRITICAL ERROR:</Text>
-          <Text color="red" wrap="truncate-end">{error}</Text>
+      {finalResult && (
+        <Box flexDirection="column" borderStyle="double" borderColor="green" paddingX={1} marginY={1} width={terminalWidth} maxHeight={10}>
+          <Box marginBottom={0}>
+            <Text bold color="green">ASSISTANT RESPONSE</Text>
+          </Box>
+          <Text color="white" wrap="wrap">{finalResult}</Text>
         </Box>
       )}
 
-      <Box flexDirection="column" height={14} flexGrow={1} marginTop={1}>
+      {status === 'error' && error && (
+        <Box borderStyle="single" borderColor="red" paddingX={1} marginBottom={1} height={4} flexDirection="column" width={terminalWidth}>
+          <Text color="red" bold>CRITICAL ERROR:</Text>
+          <Text color="red" wrap="wrap">{error}</Text>
+        </Box>
+      )}
+
+      <Box flexDirection="column" flexGrow={1} marginTop={1} width={terminalWidth} height={finalResult ? 4 : 14}>
         <Box marginBottom={1}>
-          <Text bold color="cyan">LIVE ACTIVITY LOG</Text>
+          <Text bold color="cyan">ACTIVITY LOG</Text>
         </Box>
         {messages.map((m, i) => (
           <MessageRow key={`${m.timestamp}-${i}`} m={m} width={terminalWidth} />
@@ -176,7 +185,7 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
       <Text color="gray">{horizontalLine}</Text>
 
       {status !== 'running' && (
-        <Box marginTop={1} justifyContent="center">
+        <Box marginTop={0} justifyContent="center" height={1}>
           <Text color="black" backgroundColor="white" bold> PRESS CTRL+C TO EXIT </Text>
         </Box>
       )}

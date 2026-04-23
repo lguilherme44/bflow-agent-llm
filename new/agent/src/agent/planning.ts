@@ -75,7 +75,11 @@ export class PlanningAgent {
       registry: planningRegistry,
       llmConfig: {
         ...config.llmConfig,
-        systemPrompt: config.llmConfig?.systemPrompt + '\n\nYou are a Planning Agent. Use the provided ResearchBrief to design a safe, verifiable execution plan. Break work into parallel streams where files do not overlap. Call `submit_execution_plan` to finish.'
+        systemPrompt: (config.llmConfig?.systemPrompt || '') + 
+          `\n\nVocê é um Agente de Planejamento. Sua missão é criar um plano de execução seguro.` +
+          `\nREGRAS CRÍTICAS:` +
+          `\n1. FALE APENAS EM PORTUGUÊS (PT-BR).` +
+          `\n2. Use a ferramenta 'submit_execution_plan' para finalizar sua fase.`
       }
     });
   }

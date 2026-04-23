@@ -129,11 +129,14 @@ export class OrchestratorAgent {
         llmConfig: {
           ...this.config.llmConfig,
           systemPrompt: (this.config.llmConfig?.systemPrompt || '') + 
-            `\n\n### RESEARCH CONTEXT\n${JSON.stringify(brief, null, 2)}\n` +
-            `### EXECUTION PLAN\n${plan.summary}\n` +
-            `\n\nYou are a ${stream.owner} agent. Complete the task streams. ` +
-            `IMPORTANT: Always respond in Portuguese. To provide your final answer, you MUST use the 'complete_task' tool. ` +
-            `Do NOT use a tool named 'final'. Use only 'complete_task'.`
+            `\n\n### CONTEXTO DE PESQUISA\n${JSON.stringify(brief, null, 2)}\n` +
+            `### PLANO DE EXECUÇÃO\n${plan.summary}\n` +
+            `\n\nVocê é um agente ${stream.owner}. Sua missão é executar as tarefas acima.` +
+            `\n\nREGRAS CRÍTICAS DE IDIOMA E SAÍDA:` +
+            `\n1. VOCÊ DEVE FALAR EXCLUSIVAMENTE EM PORTUGUÊS (PT-BR).` +
+            `\n2. TODOS OS SEUS PENSAMENTOS ('thought') E RESUMOS ('summary') DEVEM SER EM PORTUGUÊS.` +
+            `\n3. NÃO USE INGLÊS, MESMO QUE AS FERRAMENTAS RETORNEM TEXTO EM INGLÊS.` +
+            `\n4. PARA FINALIZAR, USE A FERRAMENTA 'complete_task' E ESCREVA O RESUMO EM PORTUGUÊS.`
         }
       });
 
@@ -145,10 +148,25 @@ export class OrchestratorAgent {
 
       if (workerState.status === 'completed') {
         stream.status = 'completed';
-        // Buscamos o resumo da ferramenta complete_task para exibir na UI
-        const completeTaskResult = workerState.toolHistory.find(t => t.call.toolName === 'complete_task')?.result;
-        const summary = (completeTaskResult as any)?.summary || 'Stream concluído com sucesso.';
         
+        // 1. Tentar pegar da ferramenta complete_task
+        const completeTaskResult = workerState.toolHistory.find(t => t.call.toolName === 'complete_task')?.result;
+        let summary = (completeTaskResult as any)?.summary;
+
+        // 2. Se não achou na ferramenta, tentar extrair do JSON da última mensagem
+        if (!summary) {
+          const lastAssistantMsg = workerState.messages.filter(m => m.role === 'assistant').at(-1)?.content || '';
+          try {
+            const cleanJson = lastAssistantMsg.replace(/```json|```/g, '').trim();
+            const parsed = JSON.parse(cleanJson);
+            // Procura em várias profundidades comuns que os modelos geram
+            summary = parsed.arguments?.summary || parsed.summary || parsed.final?.summary || parsed.thought;
+          } catch {
+            summary = lastAssistantMsg.length > 20 ? lastAssistantMsg : null;
+          }
+        }
+
+        summary = summary || 'Tarefa finalizada sem resumo específico.';
         this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${summary}` });
       } else {
         stream.status = 'failed';

@@ -224,7 +224,15 @@ export class ReActAgent {
 
     let llmResponse: LLMResponse;
     try {
-      const rawResponse = await this.config.llm.complete(messages, this.config.llmConfig);
+      // Injetamos um lembrete de idioma ao final para garantir que o modelo não se perca no contexto
+      const languageReminder = "RELEMBRE: Responda SEMPRE em PORTUGUÊS (PT-BR). Use apenas ferramentas e NÃO invente o comando 'final'.";
+      const messagesWithReminder = [...messages, { 
+        role: 'system' as const, 
+        content: languageReminder,
+        timestamp: new Date().toISOString() 
+      }];
+      
+      const rawResponse = await this.config.llm.complete(messagesWithReminder, this.config.llmConfig);
       llmResponse = this.normalizeLLMResponse(rawResponse);
       if (llmSpan) {
         this.config.tracing?.recordLLMUsage(llmSpan, llmResponse.usage);
