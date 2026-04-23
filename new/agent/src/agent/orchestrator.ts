@@ -4,13 +4,15 @@ import { ResearchAgent } from './research.js';
 import { PlanningAgent } from './planning.js';
 import { AgentStateMachine } from '../state/machine.js';
 import { ToolRegistry } from '../tools/registry.js';
+import { RiskPolicyEngine } from '../utils/risk-engine.js';
 
 export type OrchestratorEvent = 
   | { type: 'phase_start'; phase: string }
   | { type: 'phase_complete'; phase: string; details?: string }
   | { type: 'message_added'; role: string; content: string }
   | { type: 'usage_update'; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }
-  | { type: 'error'; message: string };
+  | { type: 'error'; message: string }
+  | { type: 'human_approval_request'; toolCallId: string; toolName: string; args: any; riskEvaluation?: any };
 
 export type OrchestratorUpdateCallback = (event: OrchestratorEvent) => void;
 
@@ -20,6 +22,8 @@ export class OrchestratorAgent {
   private totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   private onUpdate?: OrchestratorUpdateCallback;
   private liveConfig: ReActConfig;
+  private approvalResolver?: (approved: boolean) => void;
+  private riskEngine: RiskPolicyEngine;
 
   constructor(private config: ReActConfig) {
     const languageInstruction = "\n\nIMPORTANT: Always respond in the same language as the user's prompt. If the user speaks Portuguese, you MUST respond in Portuguese.";
@@ -29,12 +33,37 @@ export class OrchestratorAgent {
       systemPrompt: (this.config.llmConfig?.systemPrompt || '') + languageInstruction
     };
 
+    const workspaceRoot = (this.config.registry as any).workspaceRoot || process.cwd();
+    this.riskEngine = new RiskPolicyEngine(workspaceRoot);
     this.liveConfig = {
         ...this.config,
         onUpdate: (event) => {
             if (event.type === 'message_added') {
                 this.notify({ type: 'message_added', role: event.role!, content: event.content! });
             }
+        },
+        humanApprovalPolicy: (toolCall) => {
+            const evaluation = this.riskEngine.evaluateToolCall(toolCall.toolName, toolCall.arguments);
+            if (evaluation.level === 'blocked') {
+                return `BLOCKED: ${evaluation.reasons.join(', ')}`;
+            }
+            if (evaluation.level === 'high' || evaluation.level === 'medium') {
+                return evaluation.reasons.join(', ');
+            }
+            return undefined;
+        },
+        humanApprovalCallback: async (toolCall) => {
+            return new Promise((resolve) => {
+                const evaluation = this.riskEngine.evaluateToolCall(toolCall.toolName, toolCall.arguments);
+                this.approvalResolver = resolve;
+                this.notify({ 
+                    type: 'human_approval_request', 
+                    toolCallId: toolCall.id,
+                    toolName: toolCall.toolName,
+                    args: toolCall.arguments,
+                    riskEvaluation: evaluation
+                });
+            });
         }
     };
 
@@ -58,6 +87,7 @@ export class OrchestratorAgent {
 
   async run(task: string, existingState?: AgentState): Promise<{ state: AgentState; plan?: ExecutionPlan }> {
     let state = existingState ?? AgentStateMachine.create(`Orchestrate: ${task}`);
+    state = AgentStateMachine.dispatch(state, { type: 'task_started' });
 
     // --- ETAPA: CLASSIFICAÇÃO DE INTENÇÃO ---
     const intentPrompt = `Analise a tarefa do usuário: "${task}"\nResponda apenas com uma palavra: "CHAT" se for uma saudação, conversa informal ou pergunta genérica. "TASK" se for um comando técnico, solicitação de código, análise de arquivos ou tarefa de engenharia.`;
@@ -172,7 +202,8 @@ export class OrchestratorAgent {
             `\n1. VOCÊ DEVE FALAR EXCLUSIVAMENTE EM PORTUGUÊS (PT-BR).` +
             `\n2. TODOS OS SEUS PENSAMENTOS ('thought') E RESUMOS ('summary') DEVEM SER EM PORTUGUÊS.` +
             `\n3. NÃO USE INGLÊS, MESMO QUE AS FERRAMENTAS DEVEM RETORNAR TEXTO EM INGLÊS.` +
-            `\n4. PARA FINALIZAR, USE A FERRAMENTA 'complete_task' E ESCREVA O RESUMO EM PORTUGUÊS.`
+            `\n4. PARA FINALIZAR, USE A FERRAMENTA 'complete_task' E ESCREVA O RESUMO EM PORTUGUÊS.` +
+            `\n5. USE SEMPRE OS CAMINHOS EXATOS RETORNADOS PELAS FERRAMENTAS (como git_status ou list_files). NÃO ADICIONE NEM REMOVA PREFIXOS DE DIRETÓRIO.`
         }
       });
 
@@ -208,5 +239,12 @@ export class OrchestratorAgent {
     this.notify({ type: 'message_added', role: 'system', content: '=== TAREFA FINALIZADA ===' });
     this.notify({ type: 'phase_complete', phase: 'Finalized' });
     return { state, plan };
+  }
+
+  public resolveApproval(approved: boolean) {
+    if (this.approvalResolver) {
+        this.approvalResolver(approved);
+        this.approvalResolver = undefined;
+    }
   }
 }

@@ -11,7 +11,17 @@ export class ResearchAgent {
     const researchRegistry = new ToolRegistry();
     
     // Copy all read-only tools and complete_task from the original registry
-    const essentialTools = ['read_file', 'list_files', 'search_text', 'parse_file_ast', 'search_code', 'retrieve_context', 'complete_task'];
+    const essentialTools = [
+      'read_file', 
+      'list_files', 
+      'search_text', 
+      'parse_file_ast', 
+      'search_code', 
+      'retrieve_context', 
+      'git_status',
+      'run_command',
+      'execute_command'
+    ];
     for (const toolName of essentialTools) {
       const tool = config.registry.get(toolName);
       if (tool) {
@@ -61,7 +71,8 @@ export class ResearchAgent {
           `\n\nVocê é um Agente de Pesquisa. Sua missão é ler arquivos e entender o contexto para responder à tarefa.` +
           `\nREGRAS CRÍTICAS:` +
           `\n1. FALE APENAS EM PORTUGUÊS (PT-BR).` +
-          `\n2. Use a ferramenta 'submit_research_brief' para finalizar sua fase.`
+          `\n2. Use a ferramenta 'submit_research_brief' para finalizar sua fase. VOCÊ SÓ PODE TERMINAR USANDO ESTA FERRAMENTA.` +
+          `\n3. USE SEMPRE OS CAMINHOS EXATOS RETORNADOS PELAS FERRAMENTAS. NÃO ADICIONE NEM REMOVA PREFIXOS DE DIRETÓRIO.`
       }
     });
   }

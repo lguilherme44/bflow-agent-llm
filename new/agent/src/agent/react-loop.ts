@@ -283,6 +283,11 @@ export class ReActAgent {
     for (const toolCall of toolCalls) {
       const approvalReason = this.getHumanApprovalReason(next, toolCall);
       if (approvalReason) {
+        if (approvalReason.startsWith('BLOCKED:')) {
+          next = AgentStateMachine.fail(next, `Action blocked by security policy: ${approvalReason.replace('BLOCKED: ', '')}`);
+          this.config.onUpdate?.({ type: 'error', content: `Ação bloqueada por política de segurança: ${approvalReason}` });
+          return next;
+        }
         next = AgentStateMachine.requestHumanApproval(next, toolCall, approvalReason);
         await this.config.checkpointManager.checkpoint(next);
 

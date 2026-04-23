@@ -6,6 +6,7 @@ import { applyTextPatches, assertInsideWorkspace, createUnifiedDiff } from './so
 import { AstGrepService } from './ast-grep-service.js';
 import { TreeSitterParserService } from './tree-sitter-parser.js';
 import { TypeScriptLanguageService } from './typescript-language-service.js';
+import { RiskPolicyEngine } from '../utils/risk-engine.js';
 
 export class CodeEditingService {
   private readonly plans = new Map<string, EditPlan>();
@@ -14,7 +15,8 @@ export class CodeEditingService {
     private readonly workspaceRoot = process.cwd(),
     private readonly parser = new TreeSitterParserService(),
     private readonly astGrep = new AstGrepService(),
-    private readonly tsService = new TypeScriptLanguageService(workspaceRoot)
+    private readonly tsService = new TypeScriptLanguageService(workspaceRoot),
+    private readonly riskEngine = new RiskPolicyEngine()
   ) {}
 
   async readFileWithAst(filepath: string): Promise<CodeDocument> {
@@ -109,6 +111,15 @@ export class CodeEditingService {
 
   async applyEditPlan(planId: string): Promise<EditPlan> {
     const plan = this.getPlan(planId);
+
+    // Evaluate risk for all modified files
+    for (const file of plan.filesModified) {
+      const evaluation = this.riskEngine.evaluateToolCall('apply_edit_plan', { filepath: path.relative(this.workspaceRoot, file) });
+      if (evaluation.level === 'blocked') {
+        throw new Error(`Edit blocked by risk policy for file ${file}: ${evaluation.reasons.join(', ')}`);
+      }
+    }
+
     if (plan.status !== 'planned') {
       throw new Error(`Edit plan ${planId} is ${plan.status}, expected planned`);
     }
@@ -154,6 +165,11 @@ export class CodeEditingService {
   }
 
   async createFile(filepath: string, content: string): Promise<CodeDocument> {
+    const evaluation = this.riskEngine.evaluateToolCall('create_file', { filepath });
+    if (evaluation.level === 'blocked') {
+      throw new Error(`File creation blocked by risk policy: ${evaluation.reasons.join(', ')}`);
+    }
+
     const resolved = assertInsideWorkspace(this.workspaceRoot, filepath);
     await mkdir(path.dirname(resolved), { recursive: true });
     const finalContent = this.formatIfNeeded(resolved, content);

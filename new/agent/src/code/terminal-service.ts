@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { assertInsideWorkspace } from './source.js';
 import { UnifiedLogger } from '../observability/logger.js';
+import { RiskPolicyEngine } from '../utils/risk-engine.js';
 
 export interface CommandResult {
   command: string;
@@ -19,6 +20,7 @@ export interface TerminalServiceConfig {
   deniedPatterns: RegExp[];
   logger?: UnifiedLogger;
   agentId?: string;
+  riskEngine?: RiskPolicyEngine;
 }
 
 export class TerminalService {
@@ -42,6 +44,13 @@ export class TerminalService {
   }
 
   async executeCommand(command: string, cwd = '.'): Promise<CommandResult> {
+    const riskEngine = this.config.riskEngine ?? new RiskPolicyEngine();
+    const evaluation = riskEngine.evaluateToolCall('execute_command', { command });
+
+    if (evaluation.level === 'blocked') {
+      throw new Error(`Command blocked by risk policy: ${evaluation.reasons.join(', ')}`);
+    }
+
     this.validateCommand(command);
     const resolvedCwd = assertInsideWorkspace(this.workspaceRoot, cwd);
     const startedAt = Date.now();

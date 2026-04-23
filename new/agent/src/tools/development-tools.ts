@@ -4,6 +4,7 @@ import { AstGrepService } from '../code/ast-grep-service.js';
 import { CodeEditingService } from '../code/editing-service.js';
 import { assertInsideWorkspace } from '../code/source.js';
 import { TerminalService } from '../code/terminal-service.js';
+import { GitService } from '../code/git-service.js';
 import { TreeSitterParserService } from '../code/tree-sitter-parser.js';
 import { TypeScriptLanguageService } from '../code/typescript-language-service.js';
 import { LocalRagService } from '../rag/local-rag.js';
@@ -19,6 +20,7 @@ export interface DevelopmentToolOptions {
   tsLanguageService?: TypeScriptLanguageService;
   terminalService?: TerminalService;
   ragService?: LocalRagService;
+  gitService?: GitService;
 }
 
 export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions): ToolRegistry {
@@ -30,6 +32,7 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
     options?.codeEditingService ?? new CodeEditingService(workspaceRoot, parser, astGrep, tsService);
   const terminal = options?.terminalService ?? new TerminalService(workspaceRoot);
   const rag = options?.ragService ?? new LocalRagService(workspaceRoot, parser);
+  const git = options?.gitService ?? new GitService(terminal);
   const registry = new ToolRegistry();
 
   registry.register(
@@ -49,11 +52,49 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
         additionalProperties: false,
       })
       .example('Complete successfully', { status: 'success', summary: 'Implemented and verified.' })
-      .handler(async (args) => ({
-        completed: true,
-        status: args.status,
-        summary: args.summary,
-      }))
+      .handler(async (args) => {
+        if (args.status === 'failure') {
+          return { completed: true, status: 'failure', summary: args.summary };
+        }
+
+        // Automatic Validation Gate
+        try {
+          const buildResult = await terminal.executeCommand('npm.cmd run build', '.');
+          if (buildResult.exitCode !== 0) {
+            return {
+              completed: false,
+              error: `Build validation failed (exit code ${buildResult.exitCode}). Fix errors before completing.`,
+              details: buildResult.stdout + buildResult.stderr
+            };
+          }
+
+          const lintResult = await terminal.executeCommand('npm.cmd run lint', '.');
+          if (lintResult.exitCode !== 0) {
+            return {
+              completed: false,
+              error: `Lint validation failed (exit code ${lintResult.exitCode}). Fix lint issues before completing.`,
+              details: lintResult.stdout + lintResult.stderr
+            };
+          }
+
+          const testResult = await terminal.executeCommand('npm.cmd test', '.');
+          if (testResult.exitCode !== 0) {
+            return {
+              completed: false,
+              error: `Test validation failed (exit code ${testResult.exitCode}). Fix failing tests before completing.`,
+              details: testResult.stdout + testResult.stderr
+            };
+          }
+        } catch (err: any) {
+          return { completed: false, error: `Validation gate error: ${err.message}` };
+        }
+
+        return {
+          completed: true,
+          status: 'success',
+          summary: args.summary,
+        };
+      })
       .build()
   );
 
@@ -507,6 +548,66 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
         const flag = args.dev === true ? '--save-dev' : '';
         return terminal.executeCommand(`npm.cmd install ${flag} ${packageName}`.trim(), '.');
       })
+      .build()
+  );
+
+  registry.register(
+    createTool()
+      .name('git_create_branch')
+      .summary('Create a new git branch')
+      .description('Creates and switches to a new git branch for a feature or bugfix.')
+      .whenToUse('Use at the start of a new task to isolate changes.')
+      .expectedOutput('Success message or error.')
+      .parameters({
+        type: 'object',
+        properties: {
+          branchName: { type: 'string', minLength: 1 },
+        },
+        required: ['branchName'],
+        additionalProperties: false,
+      })
+      .dangerous()
+      .example('Create branch', { branchName: 'feature/new-agent-ui' })
+      .handler(async (args) => {
+        await git.createBranch(stringArg(args.branchName, 'branchName'));
+        return { message: `Branch ${args.branchName} created and checked out.` };
+      })
+      .build()
+  );
+
+  registry.register(
+    createTool()
+      .name('git_commit')
+      .summary('Commit workspace changes')
+      .description('Adds all changes and commits them with a descriptive message following Conventional Commits.')
+      .whenToUse('Use after completing a logical unit of work.')
+      .expectedOutput('Commit confirmation.')
+      .parameters({
+        type: 'object',
+        properties: {
+          message: { type: 'string', minLength: 1 },
+        },
+        required: ['message'],
+        additionalProperties: false,
+      })
+      .dangerous()
+      .example('Commit changes', { message: 'feat: add human approval UI to TUI' })
+      .handler(async (args) => {
+        await git.commit(stringArg(args.message, 'message'));
+        return { message: 'Changes committed successfully.' };
+      })
+      .build()
+  );
+
+  registry.register(
+    createTool()
+      .name('git_status')
+      .summary('Get git status')
+      .description('Returns the current git status in porcelain format.')
+      .whenToUse('Use to see modified or untracked files.')
+      .expectedOutput('Porcelain status output.')
+      .parameters({ type: 'object', properties: {}, additionalProperties: false })
+      .handler(async () => ({ status: await git.getStatus() }))
       .build()
   );
 

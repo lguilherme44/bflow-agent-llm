@@ -17,6 +17,9 @@ test('OrchestratorAgent executes research, planning, and delegates execution', a
     const checkpointManager = new CheckpointManager(new FileCheckpointStorage(path.join(workspace, '.checkpoints')));
     const llm = new MockLLMAdapter();
     
+    // 0. Intent Classification
+    llm.pushDefaultResponse('TASK');
+
     // 1. ResearchAgent LLM response
     llm.pushDefaultResponse(JSON.stringify({
       thought: 'I have researched the codebase.',

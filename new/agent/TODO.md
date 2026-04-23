@@ -661,39 +661,39 @@ Pronto quando: da para ver onde o agente pensou, agiu, falhou, recuperou e gasto
 
 ### 5.3 Guardrails de Seguranca
 
-- [ ] Whitelist de comandos permitidos.
-- [ ] Denylist de comandos perigosos:
-  - [ ] `rm -rf /`
-  - [ ] `format`
-  - [ ] `del /s`
-  - [ ] `drop database`
-  - [ ] comandos com secrets inline
+- [x] Whitelist de comandos permitidos.
+- [x] Denylist de comandos perigosos:
+  - [x] `rm -rf /`
+  - [x] `format`
+  - [x] `del /s`
+  - [x] `drop database`
+  - [x] comandos com secrets inline
 - [ ] Sandbox Docker para execucao de codigo (Urgente: Risco real antes de staging).
 - [ ] Avaliar gVisor para isolamento mais forte.
-- [ ] Restricted shell para ambientes sem Docker.
-- [ ] Permitir apenas caminhos dentro do workspace.
-- [ ] Bloquear escrita em:
-  - [ ] `.env`
-  - [ ] secrets
-  - [ ] chaves privadas
-  - [ ] configs de deploy sensiveis
-  - [ ] arquivos fora do repo
-- [ ] HITL obrigatorio para:
-  - [ ] modificacoes em arquivos sensiveis
-  - [ ] instalacao de dependencias
-  - [ ] comandos destrutivos
-  - [ ] migracoes de banco
-  - [ ] mudancas de auth/billing
-- [ ] Criar `RiskPolicyEngine`.
-- [ ] Criar score de risco por tool call.
+- [x] Restricted shell para ambientes sem Docker.
+- [x] Permitir apenas caminhos dentro do workspace.
+- [x] Bloquear escrita em:
+  - [x] `.env`
+  - [x] secrets
+  - [x] chaves privadas
+  - [x] configs de deploy sensiveis
+  - [x] arquivos fora do repo
+- [x] HITL obrigatorio para:
+  - [x] modificacoes em arquivos sensiveis
+  - [x] instalacao de dependencias
+  - [x] comandos destrutivos
+  - [x] migracoes de banco
+  - [x] mudancas de auth/billing
+- [x] Criar `RiskPolicyEngine`.
+- [x] Criar score de risco por tool call.
 
 Pronto quando: o agente nao consegue fazer uma acao perigosa sem politica explicita e aprovacao quando necessario.
 
 ### 5.4 Validacao Automatica
 
-- [ ] Typecheck antes de aceitar mudanca.
-- [ ] Testes relevantes devem passar.
-- [ ] Lint sem erros.
+- [x] Typecheck antes de aceitar mudanca.
+- [x] Testes relevantes devem passar.
+- [x] Lint sem erros.
 - [ ] Formatter aplicado.
 - [ ] Security scan em codigo gerado.
 - [ ] Detectar secrets acidentais.
@@ -703,7 +703,7 @@ Pronto quando: o agente nao consegue fazer uma acao perigosa sem politica explic
   - [ ] desktop
   - [ ] mobile
   - [ ] estados loading/error
-- [ ] Criar `AcceptanceGate` que decide se a task pode ser marcada como concluida.
+- [x] Criar `AcceptanceGate` que decide se a task pode ser marcada como concluida.
 
 Pronto quando: nenhuma mudanca e considerada pronta sem passar pelos gates definidos.
 

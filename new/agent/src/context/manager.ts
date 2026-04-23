@@ -196,9 +196,10 @@ export class ContextManager {
   private compactOldMessages(messages: AgentMessage[], summary: StructuredSummary): AgentMessage[] {
     const systemMessages = messages.filter((message) => message.role === 'system').slice(0, 1);
     const latestUserMessages = messages.filter((message) => message.role === 'user').slice(-1);
+    const recentCount = Math.max(0, this.config.maxMessages - 3);
     const recent = messages
       .filter((message) => message.role !== 'system' && message.role !== 'user')
-      .slice(-12);
+      .slice(-recentCount);
 
     const summaryMessage: AgentMessage = {
       role: 'system',

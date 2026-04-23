@@ -38,5 +38,17 @@ Este documento define as diretrizes e convenções que o agente deve seguir ao t
 - **SaaS Auth**: O agente utiliza tokens de serviço (OAuth/Service Tokens) configurados por ambiente.
 - **Local Dev**: Use `.env` local para chaves de API e configurações de ambiente.
 
-## 7. Loop de Feedback
+## 7. Estrutura de API (SaaS)
+- **Routes**: Definidas em `src/api/routes`. Usam Zod para validação.
+- **Controllers**: Lógica de orquestração de entrada em `src/api/controllers`.
+- **Services**: Lógica de negócio pura em `src/api/services`.
+- **Repositories**: Acesso a dados em `src/api/repositories`.
+
+## 8. Convenções de Teste
+- **Framework**: Vitest.
+- **Unitários**: Arquivos `.test.ts` ao lado do código ou em `src/tests`.
+- **Mocks**: Use `vi.mock` para dependências externas.
+- **Cobertura**: Manter acima de 80% em lógica crítica.
+
+## 9. Loop de Feedback
 - Falhas em ferramentas ou prompts devem ser registradas como "Lessons Learned" para retroalimentar o sistema de prompts e configuração de ferramentas.

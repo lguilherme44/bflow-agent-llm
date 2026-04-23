@@ -10,7 +10,16 @@ export class PlanningAgent {
     const planningRegistry = new ToolRegistry();
     
     // Planner shouldn't execute edits, only read context and plan
-    const essentialTools = ['read_file', 'list_files', 'search_text', 'search_code', 'retrieve_context', 'complete_task'];
+    const essentialTools = [
+      'read_file', 
+      'list_files', 
+      'search_text', 
+      'search_code', 
+      'retrieve_context', 
+      'git_status',
+      'run_command',
+      'execute_command'
+    ];
     for (const toolName of essentialTools) {
       const tool = config.registry.get(toolName);
       if (tool) {
@@ -79,7 +88,8 @@ export class PlanningAgent {
           `\n\nVocê é um Agente de Planejamento. Sua missão é criar um plano de execução seguro.` +
           `\nREGRAS CRÍTICAS:` +
           `\n1. FALE APENAS EM PORTUGUÊS (PT-BR).` +
-          `\n2. Use a ferramenta 'submit_execution_plan' para finalizar sua fase.`
+          `\n2. Use a ferramenta 'submit_execution_plan' para finalizar sua fase. VOCÊ SÓ PODE TERMINAR USANDO ESTA FERRAMENTA.` +
+          `\n3. USE SEMPRE OS CAMINHOS EXATOS RETORNADOS PELAS FERRAMENTAS. NÃO ADICIONE NEM REMOVA PREFIXOS DE DIRETÓRIO.`
       }
     });
   }

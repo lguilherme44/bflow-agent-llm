@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, memo } from 'react';
-import { Text, Box, useStdout } from 'ink';
+import { Text, Box, useStdout, useInput, useApp } from 'ink';
 import Spinner from 'ink-spinner';
+import TextInput from 'ink-text-input';
 import { OrchestratorAgent, OrchestratorEvent } from '../agent/orchestrator.js';
+import { RiskPolicyEngine } from '../utils/risk-engine.js';
 
 interface AppProps {
   orchestrator: OrchestratorAgent;
@@ -21,12 +23,12 @@ const MessageRow = memo(({ m, width }: { m: DisplayMessage; width: number }) => 
   const contentWidth = width - timestamp.length - role.length - 2;
 
   return (
-    <Box width={width} height={1}>
+    <Box width={Math.max(width, 0)} height={1}>
       <Text color="gray">{timestamp}</Text>
       <Text bold color={m.role === 'system' ? 'blue' : m.role === 'assistant' ? 'green' : 'white'}>
         {role}
       </Text>
-      <Box width={contentWidth}>
+      <Box width={Math.max(contentWidth, 1)}>
         <Text color="white" wrap="truncate-end">{cleanContent}</Text>
       </Box>
     </Box>
@@ -37,14 +39,46 @@ MessageRow.displayName = 'MessageRow';
 
 export const App = ({ orchestrator, initialTask }: AppProps) => {
   const { stdout } = useStdout();
-  const terminalWidth = (stdout?.columns || 100) - 4;
+  const [dimensions, setDimensions] = useState({
+    columns: stdout?.columns || 100,
+    rows: stdout?.rows || 30
+  });
+
+  useEffect(() => {
+    const handleResize = () => {
+      setDimensions({
+        columns: stdout?.columns || 100,
+        rows: stdout?.rows || 30
+      });
+    };
+
+    stdout?.on('resize', handleResize);
+    return () => {
+      stdout?.off('resize', handleResize);
+    };
+  }, [stdout]);
+
+  const terminalWidth = Math.max(dimensions.columns - 4, 20);
+  // Cap height to 28 to avoid flickering in fullscreen terminals while remaining responsive for small ones
+  const terminalHeight = Math.min(Math.max(dimensions.rows - 2, 15), 28);
   
-  const [status, setStatus] = useState<'running' | 'completed' | 'error'>('running');
+  const { exit } = useApp();
+  const [query, setQuery] = useState('');
+  const [isRunning, setIsRunning] = useState(false);
+  const [status, setStatus] = useState<'running' | 'completed' | 'error' | 'idle'>('idle');
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [currentPhase, setCurrentPhase] = useState<string>('Research');
+  const [currentPhase, setCurrentPhase] = useState<string>('Ready');
   const [usage, setUsage] = useState({ totalTokens: 0 });
   const [error, setError] = useState<string | null>(null);
   const [finalResult, setFinalResult] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<{
+    toolCallId: string;
+    toolName: string;
+    args: any;
+    risk?: any;
+  } | null>(null);
+
+  const riskEngine = useMemo(() => new RiskPolicyEngine(), []);
 
   const formatContent = useMemo(() => (content: string): string => {
     try {
@@ -59,6 +93,31 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
       return content;
     }
   }, []);
+
+  const handleTaskSubmit = async (task: string) => {
+    if (!task.trim() || isRunning) return;
+    
+    setIsRunning(true);
+    setStatus('running');
+    setQuery('');
+    setFinalResult(null);
+    setError(null);
+    
+    setMessages(prev => [...prev, {
+      role: 'user',
+      content: `> ${task}`,
+      timestamp: new Date().toLocaleTimeString().split(' ')[0]
+    }].slice(-12));
+
+    try {
+      await orchestrator.run(task);
+    } catch (err: any) {
+      setStatus('error');
+      setError(err.message);
+    } finally {
+      setIsRunning(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -100,28 +159,46 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
           setStatus('error');
           setError(event.message);
           break;
+        case 'human_approval_request':
+          const evaluation = riskEngine.evaluateToolCall(event.toolName, event.args);
+          setPendingApproval({
+            toolCallId: event.toolCallId,
+            toolName: event.toolName,
+            args: event.args,
+            risk: evaluation
+          });
+          break;
       }
     });
 
-    const runAgent = async () => {
-      try {
-        await orchestrator.run(initialTask);
-      } catch (err: any) {
-        if (isMounted) {
-          setStatus('error');
-          setError(err.message);
-        }
-      }
-    };
-
-    runAgent();
+    if (initialTask) {
+      handleTaskSubmit(initialTask);
+    }
+    
     return () => { isMounted = false; };
-  }, [orchestrator, initialTask, formatContent]);
+  }, [orchestrator, initialTask, formatContent, riskEngine]);
 
-  const horizontalLine = '─'.repeat(terminalWidth);
+  useInput((input, key) => {
+    if (key.ctrl && input === 'c') {
+      exit();
+      return;
+    }
+
+    if (!pendingApproval) return;
+
+    if (input === 'a' || input === 'A') {
+      orchestrator.resolveApproval(true);
+      setPendingApproval(null);
+    } else if (input === 'r' || input === 'R') {
+      orchestrator.resolveApproval(false);
+      setPendingApproval(null);
+    }
+  });
+
+  const horizontalLine = '─'.repeat(Math.max(terminalWidth, 0));
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} width={terminalWidth + 4} height={26}>
+    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} width={dimensions.columns} height={terminalHeight}>
       <Box marginBottom={1} justifyContent="center" height={1}>
         <Text bold color="cyan" inverse> AGENT OS v1.0 </Text>
       </Box>
@@ -140,7 +217,11 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
           
           <Text bold>  PHASE: </Text>
           <Text color="blue">{currentPhase.toUpperCase()}</Text>
-          {status === 'running' && <Text color="blue"> <Spinner type="dots" /></Text>}
+          {status === 'running' && (
+            <Box marginLeft={1}>
+              <Text color="blue"><Spinner type="dots" /></Text>
+            </Box>
+          )}
         </Box>
         
         <Box>
@@ -168,7 +249,7 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
         </Box>
       )}
 
-      <Box flexDirection="column" flexGrow={1} marginTop={1} width={terminalWidth} height={finalResult ? 4 : 14}>
+      <Box flexDirection="column" flexGrow={1} marginTop={1} width={terminalWidth}>
         <Box marginBottom={1}>
           <Text bold color="cyan">ACTIVITY LOG</Text>
         </Box>
@@ -184,9 +265,52 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
 
       <Text color="gray">{horizontalLine}</Text>
 
-      {status !== 'running' && (
-        <Box marginTop={0} justifyContent="center" height={1}>
-          <Text color="black" backgroundColor="white" bold> PRESS CTRL+C TO EXIT </Text>
+      {status !== 'running' && !pendingApproval && (
+        <Box marginTop={0} flexDirection="column">
+          <Box marginBottom={1}>
+            <Text color="cyan" bold>PRÓXIMA TAREFA: </Text>
+            <TextInput 
+              value={query} 
+              onChange={setQuery} 
+              onSubmit={handleTaskSubmit}
+              placeholder="Digite sua próxima solicitação ou CTRL+C para sair..."
+            />
+          </Box>
+          <Box justifyContent="center" height={1}>
+            <Text color="black" backgroundColor="white" bold> CTRL+C PARA SAIR </Text>
+          </Box>
+        </Box>
+      )}
+
+      {pendingApproval && (
+        <Box flexDirection="column" borderStyle="bold" borderColor="yellow" paddingX={1} marginY={1} width={terminalWidth}>
+          <Box justifyContent="center" marginBottom={1}>
+            <Text bold color="yellow" inverse> ⚠ APROVAÇÃO NECESSÁRIA ⚠ </Text>
+          </Box>
+          <Box>
+            <Text bold>Ferramenta: </Text>
+            <Text color="cyan">{pendingApproval.toolName}</Text>
+          </Box>
+          <Box>
+            <Text bold>Argumentos: </Text>
+            <Text dimColor>{JSON.stringify(pendingApproval.args).slice(0, 100)}...</Text>
+          </Box>
+          {pendingApproval.risk && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold>Risco: </Text>
+              <Text color={pendingApproval.risk.level === 'high' ? 'red' : 'yellow'}>
+                {pendingApproval.risk.level.toUpperCase()} (Score: {pendingApproval.risk.score})
+              </Text>
+              {pendingApproval.risk.reasons.map((r: string, i: number) => (
+                <Text key={i} dimColor>• {r}</Text>
+              ))}
+            </Box>
+          )}
+          <Box marginTop={1} justifyContent="center">
+            <Text backgroundColor="green" color="white" bold> [A]provar </Text>
+            <Text>  </Text>
+            <Text backgroundColor="red" color="white" bold> [R]ejeitar </Text>
+          </Box>
         </Box>
       )}
     </Box>

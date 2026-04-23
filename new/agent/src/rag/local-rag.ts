@@ -37,7 +37,16 @@ export class LocalRagService {
   ) {}
 
   async indexWorkspace(directory = '.'): Promise<RagIndexStats> {
-    const files = await this.listIndexableFiles(path.resolve(this.workspaceRoot, directory));
+    const targetPath = path.resolve(this.workspaceRoot, directory);
+    const targetStat = await stat(targetPath);
+    
+    let files: string[];
+    if (targetStat.isFile()) {
+      files = isIndexable(targetPath) ? [targetPath] : [];
+    } else {
+      files = await this.listIndexableFiles(targetPath);
+    }
+
     let filesIndexed = 0;
     let skippedFiles = 0;
 
