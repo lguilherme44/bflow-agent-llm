@@ -4,11 +4,12 @@ import { AstGrepService } from '../code/ast-grep-service.js';
 import { CodeEditingService } from '../code/editing-service.js';
 import { assertInsideWorkspace } from '../code/source.js';
 import { TerminalService } from '../code/terminal-service.js';
-import { GitService } from '../code/git-service.js';
+import { GitFileStatus, GitService } from '../code/git-service.js';
 import { TreeSitterParserService } from '../code/tree-sitter-parser.js';
 import { TypeScriptLanguageService } from '../code/typescript-language-service.js';
 import { LocalRagService } from '../rag/local-rag.js';
 import { JsonValue } from '../types/index.js';
+import { BuildDiagnostic, TerminalOutputParser, TestFailure } from '../utils/terminal-output-parser.js';
 import { createTool } from './schema.js';
 import { ToolRegistry } from './registry.js';
 
@@ -34,6 +35,7 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
   const rag = options?.ragService ?? new LocalRagService(workspaceRoot, parser);
   const git = options?.gitService ?? new GitService(terminal);
   const registry = new ToolRegistry();
+  (registry as ToolRegistry & { workspaceRoot: string }).workspaceRoot = workspaceRoot;
 
   registry.register(
     createTool()
@@ -57,32 +59,18 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
           return { completed: true, status: 'failure', summary: args.summary };
         }
 
-        // Automatic Validation Gate
+        let validation: ValidationGateResult;
         try {
-          const buildResult = await terminal.executeCommand('npm.cmd run build', '.');
-          if (buildResult.exitCode !== 0) {
+          validation = await runValidationGate(workspaceRoot, terminal, ['build', 'lint', 'test']);
+          if (!validation.ok) {
             return {
               completed: false,
-              error: `Build validation failed (exit code ${buildResult.exitCode}). Fix errors before completing.`,
-              details: buildResult.stdout + buildResult.stderr
-            };
-          }
-
-          const lintResult = await terminal.executeCommand('npm.cmd run lint', '.');
-          if (lintResult.exitCode !== 0) {
-            return {
-              completed: false,
-              error: `Lint validation failed (exit code ${lintResult.exitCode}). Fix lint issues before completing.`,
-              details: lintResult.stdout + lintResult.stderr
-            };
-          }
-
-          const testResult = await terminal.executeCommand('npm.cmd test', '.');
-          if (testResult.exitCode !== 0) {
-            return {
-              completed: false,
-              error: `Test validation failed (exit code ${testResult.exitCode}). Fix failing tests before completing.`,
-              details: testResult.stdout + testResult.stderr
+              status: 'failure',
+              summary: validation.error,
+              error: validation.error,
+              diagnostics: validation.diagnostics,
+              failures: validation.failures,
+              skippedValidations: validation.skipped,
             };
           }
         } catch (err: any) {
@@ -93,6 +81,7 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
           completed: true,
           status: 'success',
           summary: args.summary,
+          skippedValidations: validation.skipped,
         };
       })
       .build()
@@ -493,7 +482,20 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
       .parameters({ type: 'object', properties: {}, additionalProperties: false })
       .dangerous()
       .example('Run tests', {})
-      .handler(async () => terminal.executeCommand('npm.cmd test', '.'))
+      .handler(async () => {
+        const result = await terminal.executeCommand('npm.cmd test', '.');
+        const failures = TerminalOutputParser.parseTestFailures(result.stdout, result.stderr);
+        const relatedFiles = TerminalOutputParser.suggestFiles(failures);
+        
+        return {
+          ...result,
+          failures,
+          relatedFiles,
+          summary: failures.length > 0 
+            ? `Failed ${failures.length} tests.` 
+            : 'All tests passed.'
+        };
+      })
       .build()
   );
 
@@ -507,7 +509,20 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
       .parameters({ type: 'object', properties: {}, additionalProperties: false })
       .dangerous()
       .example('Run build', {})
-      .handler(async () => terminal.executeCommand('npm.cmd run build', '.'))
+      .handler(async () => {
+        const result = await terminal.executeCommand('npm.cmd run build', '.');
+        const diagnostics = TerminalOutputParser.parseBuildDiagnostics(result.stdout, result.stderr);
+        const relatedFiles = TerminalOutputParser.suggestFiles(diagnostics);
+
+        return {
+          ...result,
+          diagnostics,
+          relatedFiles,
+          summary: diagnostics.length > 0 
+            ? `Found ${diagnostics.length} build errors.` 
+            : 'Build successful.'
+        };
+      })
       .build()
   );
 
@@ -518,10 +533,33 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
       .description('Runs npm lint when configured through the guarded terminal service.')
       .whenToUse('Use after formatting-sensitive code changes when lint exists.')
       .expectedOutput('Command result and lint diagnostics output.')
-      .parameters({ type: 'object', properties: {}, additionalProperties: false })
+      .parameters({
+        type: 'object',
+        properties: {
+          autoFix: { type: 'boolean' },
+        },
+        additionalProperties: false,
+      })
       .dangerous()
-      .example('Run linter', {})
-      .handler(async () => terminal.executeCommand('npm.cmd run lint', '.'))
+      .example('Run linter with auto-fix', { autoFix: true })
+      .handler(async (args) => {
+        const command = args.autoFix === true ? 'npm.cmd run lint -- --fix' : 'npm.cmd run lint';
+        
+        const beforeStatus = await git.getParsedStatus();
+        const result = await terminal.executeCommand(command, '.');
+        const afterStatus = await git.getParsedStatus();
+        const beforeByFile = new Map(beforeStatus.map((status: GitFileStatus) => [status.filepath, status.status]));
+        const modified = afterStatus.filter(
+          (status: GitFileStatus) => beforeByFile.get(status.filepath) !== status.status
+        );
+        
+        return {
+          ...result,
+          autoFixed: args.autoFix === true && modified.length > 0,
+          fixedFiles: modified.map((m: GitFileStatus) => m.filepath),
+          summary: result.exitCode === 0 ? 'Lint passed.' : 'Lint found issues.',
+        };
+      })
       .build()
   );
 
@@ -593,8 +631,26 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
       .dangerous()
       .example('Commit changes', { message: 'feat: add human approval UI to TUI' })
       .handler(async (args) => {
+        let validation: ValidationGateResult;
+        try {
+          validation = await runValidationGate(workspaceRoot, terminal, ['build', 'lint']);
+          if (!validation.ok) {
+            return {
+              success: false,
+              error: `Commit blocked: ${validation.error}`,
+              diagnostics: validation.diagnostics,
+              skippedValidations: validation.skipped,
+            };
+          }
+        } catch (err: any) {
+          return { success: false, error: `Validation gate error: ${err.message}` };
+        }
+
         await git.commit(stringArg(args.message, 'message'));
-        return { message: 'Changes committed successfully.' };
+        return {
+          message: 'Changes committed successfully.',
+          skippedValidations: validation.skipped,
+        };
       })
       .build()
   );
@@ -641,6 +697,91 @@ function packageArg(value: JsonValue | undefined): string {
     throw new Error('packageName contains unsupported characters');
   }
   return packageName;
+}
+
+type ValidationScript = 'build' | 'lint' | 'test';
+
+interface ValidationGateResult {
+  ok: boolean;
+  skipped: ValidationScript[];
+  error?: string;
+  diagnostics?: BuildDiagnostic[];
+  failures?: TestFailure[];
+}
+
+async function getAvailableScripts(workspaceRoot: string): Promise<Set<string>> {
+  try {
+    const packageJsonPath = assertInsideWorkspace(workspaceRoot, 'package.json');
+    const raw = await readFile(packageJsonPath, 'utf8');
+    const parsed = JSON.parse(raw) as { scripts?: Record<string, unknown> };
+
+    if (!parsed.scripts || typeof parsed.scripts !== 'object') {
+      return new Set<string>();
+    }
+
+    return new Set(
+      Object.entries(parsed.scripts)
+        .filter(([, value]) => typeof value === 'string')
+        .map(([name]) => name)
+    );
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return new Set<string>();
+    }
+
+    throw error;
+  }
+}
+
+async function runValidationGate(
+  workspaceRoot: string,
+  terminal: TerminalService,
+  scriptsToRun: ValidationScript[]
+): Promise<ValidationGateResult> {
+  const availableScripts = await getAvailableScripts(workspaceRoot);
+  const skipped = scriptsToRun.filter((script) => !availableScripts.has(script));
+
+  if (scriptsToRun.includes('build') && availableScripts.has('build')) {
+    const buildResult = await terminal.executeCommand('npm.cmd run build', '.');
+    if (buildResult.exitCode !== 0) {
+      return {
+        ok: false,
+        skipped,
+        error: `Build validation failed (exit code ${buildResult.exitCode ?? 'unknown'}).`,
+        diagnostics: TerminalOutputParser.parseBuildDiagnostics(buildResult.stdout, buildResult.stderr),
+      };
+    }
+  }
+
+  if (scriptsToRun.includes('lint') && availableScripts.has('lint')) {
+    const lintResult = await terminal.executeCommand('npm.cmd run lint', '.');
+    if (lintResult.exitCode !== 0) {
+      return {
+        ok: false,
+        skipped,
+        error: `Lint validation failed (exit code ${lintResult.exitCode ?? 'unknown'}).`,
+        diagnostics: TerminalOutputParser.parseBuildDiagnostics(lintResult.stdout, lintResult.stderr),
+      };
+    }
+  }
+
+  if (scriptsToRun.includes('test') && availableScripts.has('test')) {
+    const testResult = await terminal.executeCommand('npm.cmd test', '.');
+    if (testResult.exitCode !== 0) {
+      return {
+        ok: false,
+        skipped,
+        error: `Test validation failed (exit code ${testResult.exitCode ?? 'unknown'}).`,
+        failures: TerminalOutputParser.parseTestFailures(testResult.stdout, testResult.stderr),
+      };
+    }
+  }
+
+  return { ok: true, skipped };
+}
+
+function isMissingFile(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
 async function listFiles(workspaceRoot: string, directory: string, extensions?: string[]): Promise<string[]> {

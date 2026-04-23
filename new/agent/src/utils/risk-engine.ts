@@ -12,13 +12,13 @@ export interface RiskEvaluation {
 export class RiskPolicyEngine {
   private readonly sensitiveFiles = [
     /\.env$/,
-    /\.git\//,
-    /node_modules\//,
+    /\.git([\\/]|$)/,
+    /node_modules([\\/]|$)/,
     /package-lock\.json$/,
     /yarn\.lock$/,
     /pnpm-lock\.yaml$/,
     /\.agentrc$/,
-    /secrets\//,
+    /secrets([\\/]|$)/,
   ];
 
   private readonly dangerousCommands = [
@@ -28,6 +28,10 @@ export class RiskPolicyEngine {
     { pattern: /\bdrop\s+database\b/i, level: 'blocked', reason: 'Database destruction' },
     { pattern: /\bshutdown\b/i, level: 'blocked', reason: 'System shutdown' },
     { pattern: /curl\s+\S+\s+\|\s+sh/i, level: 'high', reason: 'Executing remote scripts' },
+    { pattern: /\bgit\s+reset\s+--hard\b/i, level: 'blocked', reason: 'Hard reset discards local changes' },
+    { pattern: /\bgit\s+clean\s+-f/i, level: 'blocked', reason: 'Git clean removes untracked files' },
+    { pattern: /\bgit\s+push\b.*\s--force\b/i, level: 'high', reason: 'Force-pushing can overwrite remote history' },
+    { pattern: /(&&|\|\||;)/, level: 'high', reason: 'Shell command chaining increases execution risk' },
   ];
 
   constructor(private readonly workspaceRoot: string = process.cwd()) {}
@@ -52,12 +56,13 @@ export class RiskPolicyEngine {
     if (typeof filepath === 'string') {
       const normalizedWorkspace = path.resolve(this.workspaceRoot);
       const fullPath = path.resolve(normalizedWorkspace, filepath);
+      const normalizedFilepath = filepath.replace(/\\/g, '/');
       
       if (!fullPath.startsWith(normalizedWorkspace)) {
         return { level: 'blocked', score: 100, reasons: [`Path outside workspace: ${filepath}`] };
       }
 
-      const isSensitive = this.sensitiveFiles.some((pattern) => pattern.test(filepath));
+      const isSensitive = this.sensitiveFiles.some((pattern) => pattern.test(normalizedFilepath));
       if (isSensitive) {
         score += 50;
         reasons.push(`Accessing sensitive file: ${filepath}`);

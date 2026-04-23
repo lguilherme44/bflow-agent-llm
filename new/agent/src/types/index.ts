@@ -447,7 +447,6 @@ export interface RetrievalChunk {
   metadata: RetrievalChunkMetadata;
   tokensEstimate: number;
   indexedAt: string;
-  vector: Record<string, number>;
 }
 
 export interface RetrievalResult {

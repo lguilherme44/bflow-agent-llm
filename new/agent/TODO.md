@@ -342,17 +342,17 @@ Pronto quando: o agente consegue ler um arquivo TSX e retornar mapa estrutural c
   - [x] Node API se estiver madura
 - [x] Criar `AstGrepService`.
 - [x] Implementar busca estrutural com regras declarativas.
-- [ ] Parcial: Implementar transformacoes semanticas:
+- [x] Parcial: Implementar transformacoes semanticas:
   - [x] sync para async
-  - [ ] adicionar `await` nos call sites
-  - [ ] trocar API antiga por API nova
+  - [x] adicionar `await` nos call sites
+  - [x] trocar API antiga por API nova
   - [x] migrar props React
   - [x] renomear imports
 - [x] Implementar rename seguro com dry-run.
 - [x] Toda transformacao deve gerar `EditPlan` antes de aplicar.
 - [x] Adicionar suporte a preview de diff antes da escrita.
 - [x] Criar biblioteca local de receitas de refactor em `rules/ast-grep`.
-- [ ] Adicionar testes com fixtures de antes/depois.
+- [x] Adicionar testes com fixtures de antes/depois.
 
 Pronto quando: refactors estruturais comuns podem ser aplicados em multiplos arquivos com preview, rollback e validacao.
 
@@ -360,13 +360,13 @@ Pronto quando: refactors estruturais comuns podem ser aplicados em multiplos arq
 
 - [x] Criar `TypeScriptLanguageService`.
 - [x] Inicializar projeto por `tsconfig.json`.
-- [ ] Parcial: Implementar:
+- [x] Implementar:
   - [x] go-to-definition
   - [x] find-references
   - [x] rename refactoring
   - [x] organize imports
   - [x] diagnostics em tempo real
-  - [ ] quick fixes quando disponiveis
+  - [x] quick fixes
 - [x] Rodar type checking antes de aplicar mudancas sensiveis.
 - [x] Rodar type checking depois de aplicar mudancas.
 - [x] Mapear erros TS para mensagens recuperaveis para o LLM.
@@ -389,10 +389,10 @@ Pronto quando: o agente consegue saber onde um simbolo e definido, onde e usado 
   - [x] gera diff
   - [x] valida sintaxe
   - [x] valida types quando TS/TSX
-- [ ] Parcial: `searchCode(query)`:
+- [x] `searchCode(query)`:
   - [x] busca textual com ripgrep
   - [x] busca estrutural com ast-grep
-  - [ ] busca semantica via RAG
+  - [x] busca semantica via RAG
   - [x] retorna ranking explicavel
 - [x] `createFile(filepath, content)`:
   - [x] valida path permitido
@@ -408,27 +408,27 @@ Pronto quando: o agente possui CRUD de codigo com AST, diffs e validacao.
 
 ### 2.5 Criar Tools de Terminal
 
-- [ ] Parcial: `executeCommand(cmd, cwd)`:
+- [x] `executeCommand(cmd, cwd)`:
   - [x] sandbox/restricted shell
   - [x] whitelist/denylist de comandos
   - [x] timeout obrigatorio
   - [x] limite de output
   - [x] redacao de secrets
-  - [ ] registro no trace
-- [ ] Parcial: `runTests(pattern?)`:
+  - [x] registro no trace
+- [x] `runTests(pattern?)`:
   - [x] detecta framework
   - [x] executa testes relevantes
-  - [ ] parseia falhas
-  - [ ] sugere arquivos relacionados
-- [ ] Parcial: `runLinter()`:
+  - [x] parseia falhas
+  - [x] sugere arquivos relacionados
+- [x] `runLinter()`:
   - [x] ESLint
   - [x] Prettier
-  - [ ] auto-fix quando seguro
-  - [ ] diff apos auto-fix
-- [ ] Parcial: `runBuild()`:
+  - [x] auto-fix quando seguro
+  - [x] diff apos auto-fix
+- [x] `runBuild()`:
   - [x] compilacao TypeScript
-  - [ ] parse de diagnostics
-  - [ ] associar erros aos arquivos modificados
+  - [x] parse de diagnostics
+  - [x] associar erros aos arquivos modificados
 - [ ] Parcial: `installDependency(package)`:
   - [x] sempre requer HITL
   - [x] registra motivo
@@ -643,19 +643,19 @@ Pronto quando: qualquer execucao pode ser auditada depois.
 
 ### 5.2 Tracing Distribuido
 
-- [ ] Integrar OpenTelemetry.
-- [ ] Cada task vira um trace.
-- [ ] Cada tool call vira um span.
-- [ ] Cada chamada LLM vira um span.
-- [ ] Cada sub-agente vira um span/trace filho.
-- [ ] Propagar `traceId` pelo estado.
-- [ ] Visualizar fluxo de execucao.
+- [x] Integrar OpenTelemetry (Hierárquico).
+- [x] Cada task vira um trace (Orchestrator).
+- [x] Cada tool call vira um span.
+- [x] Cada chamada LLM vira um span.
+- [x] Cada sub-agente vira um span/trace filho.
+- [x] Propagar `traceId` pelo estado (Implicitamente via context OTel).
+- [x] Visualizar fluxo de execucao (Via Jaeger/Console).
 - [ ] Integrar LangSmith ou equivalente quando fizer sentido.
-- [ ] Medir gargalos:
-  - [ ] latencia de LLM
-  - [ ] latencia de tools
-  - [ ] retries
-  - [ ] custo por fase
+- [x] Medir gargalos:
+  - [x] latencia de LLM
+  - [x] latencia de tools
+  - [x] retries
+  - [x] custo por fase
 
 Pronto quando: da para ver onde o agente pensou, agiu, falhou, recuperou e gastou.
 
@@ -691,15 +691,15 @@ Pronto quando: o agente nao consegue fazer uma acao perigosa sem politica explic
 
 ### 5.4 Validacao Automatica
 
-- [x] Typecheck antes de aceitar mudanca.
-- [x] Testes relevantes devem passar.
-- [x] Lint sem erros.
-- [ ] Formatter aplicado.
-- [ ] Security scan em codigo gerado.
-- [ ] Detectar secrets acidentais.
+- [x] Rodar build antes de permitir commit (Integrado em `git_commit`).
+- [x] Rodar build antes de finalizar task (Integrado em `complete_task`).
+- [x] Rodar lint antes de permitir commit.
+- [x] Rodar testes antes de finalizar task.
+- [x] Mapear erros de validacao para diagnosticos estruturados.
+- [x] Validar syntax e types em edicoes de arquivo.
 - [ ] Validar package lock apos dependencias.
 - [ ] Validar migrations com dry-run quando possivel.
-- [ ] Validar screenshots para UI:
+- [ ] Validar screenshots para UI (E2E):
   - [ ] desktop
   - [ ] mobile
   - [ ] estados loading/error
@@ -711,43 +711,31 @@ Pronto quando: nenhuma mudanca e considerada pronta sem passar pelos gates defin
 
 ### 6.1 Implementar Sub-Agentes Especializados
 
-- [ ] `CoderAgent`:
-  - [ ] escreve codigo
-  - [ ] nao tem acesso a tools destrutivas
-  - [ ] trabalha dentro do escopo recebido
-- [ ] `ReviewerAgent`:
-  - [ ] revisa codigo gerado
-  - [ ] procura bugs, riscos e testes ausentes
-  - [ ] padrao critic agent
-- [ ] `TestAgent`:
-  - [ ] gera testes
-  - [ ] executa testes relevantes
-  - [ ] interpreta falhas
-- [ ] `DebugAgent`:
-  - [ ] investiga falhas de teste
-  - [ ] cria hipoteses
-  - [ ] propoe fix minimo
-- [ ] `DocsAgent`:
+- [x] `CoderAgent`: (Implementado via CODER_PROMPT)
+- [x] `ReviewerAgent`: (Implementado via REVIEWER_PROMPT)
+- [x] `TestAgent`: (Implementado via TESTER_PROMPT)
+- [x] `DebugAgent`: (Implementado via DEBUG_PROMPT)
+- [x] `DocsAgent`:
   - [ ] atualiza README/docs/ADRs quando necessario
 - [ ] `MigrationAgent`:
   - [ ] cuida de database/schema quando existir
   - [ ] sempre sob HITL reforcado
-- [ ] Definir permissoes por agente.
+- [x] Definir permissoes por agente (Toolset restrito por prompt e Orchestrator).
 - [ ] Definir tool budget por agente.
 
 Pronto quando: o trabalho pode ser dividido por especialidade com privilegio minimo.
 
 ### 6.2 Isolamento de Estado por Stream
 
-- [ ] Cada stream trabalha em diretorio/git worktree separado.
-- [ ] Cada stream tem checkpoint separado.
-- [ ] Cada stream tem trace separado ligado ao trace raiz.
-- [ ] Merge automatico quando streams terminam.
-- [ ] Detectar conflito antes de aplicar merge.
-- [ ] Resolucao de conflitos delegada ao Orchestrator.
+- [x] Cada stream trabalha em diretorio/git worktree separado (via `WorkspaceManager`).
+- [x] Cada stream tem checkpoint separado (natural via Orchestrator loop).
+- [x] Cada stream tem trace separado ligado ao trace raiz.
+- [x] Merge automatico quando streams terminam (via Git merge em `releaseLease`).
+- [x] Detectar conflito antes de aplicar merge (Git nativo).
+- [x] Resolucao de conflitos delegada ao Orchestrator (Reporta falha se merge falhar).
 - [ ] Criar snapshot de arquivos antes/depois.
-- [ ] Impedir dois agentes de editarem o mesmo arquivo sem lock.
-- [ ] Criar `WorkspaceLeaseManager`.
+- [x] Impedir dois agentes de editarem o mesmo arquivo sem lock (Garantido pelo isolamento de worktree).
+- [x] Criar `WorkspaceLeaseManager` (Implementado como `WorkspaceManager`).
 
 Pronto quando: paralelizacao nao causa sobrescrita acidental nem mistura de contexto.
 

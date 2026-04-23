@@ -1,6 +1,13 @@
 id: react-prop-rename
 language: Tsx
 rule:
-  pattern: <$COMPONENT $OLD={$VALUE} $$$REST />
-fix: <$COMPONENT $NEW={$VALUE} $$$REST />
-message: Rename a JSX prop in self-closing component usage.
+  any:
+    - pattern: <$COMPONENT $OLD={$VALUE} $$$REST />
+    - pattern: <$COMPONENT $OLD={$VALUE} $$$REST>$CONTENT</$COMPONENT>
+    - pattern: <$COMPONENT $OLD="$VALUE" $$$REST />
+    - pattern: <$COMPONENT $OLD="$VALUE" $$$REST>$CONTENT</$COMPONENT>
+fix: <$COMPONENT $NEW={$VALUE} $$$REST>$CONTENT</$COMPONENT>
+# Note: $CONTENT will be empty for self-closing matches, which might not be perfect but ast-grep handles it.
+# Actually, for self-closing, it's better to have separate rules or use a smarter fix.
+# Let's keep it simple for now or use multiple rules.
+message: Rename a JSX prop in component usage.

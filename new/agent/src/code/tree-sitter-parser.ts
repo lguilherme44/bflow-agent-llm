@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { AstNode, CodeDiagnostic, CodeDocument, CodeLanguage, SourceRange, SymbolReference } from '../types/index.js';
 import { detectLanguage, hashContent } from './source.js';
+import { TREE_SITTER_QUERIES } from './tree-sitter-queries.js';
 
 // Cria um require compatível com ESM
 const require = createRequire(import.meta.url);
@@ -152,16 +153,68 @@ export class TreeSitterParserService {
   }
 
   private collectSymbols(filepath: string, rootNode: any): SymbolReference[] {
+    const language = detectLanguage(filepath);
+    const queryConfig = TREE_SITTER_QUERIES.find((q) => q.language === language);
+    
+    if (!queryConfig) {
+      // Fallback to manual walk if no query is defined
+      const symbols: SymbolReference[] = [];
+      this.walk(rootNode, (node) => {
+        const symbol = this.symbolForNode(filepath, node);
+        if (symbol) symbols.push(symbol);
+      });
+      return symbols;
+    }
+
+    const grammar = this.getGrammar(language);
+    const query = new Parser.Query(grammar, queryConfig.query);
+    const matches = query.matches(rootNode);
     const symbols: SymbolReference[] = [];
 
-    this.walk(rootNode, (node) => {
-      const symbol = this.symbolForNode(filepath, node);
-      if (symbol) {
-        symbols.push(symbol);
+    for (const match of matches) {
+      for (const capture of match.captures) {
+        // We only care about the top-level captures (the ones without dots in name like @function)
+        // Sub-captures like @function.name are used for identification but handled here
+        if (!capture.name.includes('.')) {
+          const kind = capture.name as SymbolReference['kind'];
+          const node = capture.node;
+          
+          // Find the name capture for this symbol
+          const nameCapture = match.captures.find((c: any) => c.name === `${capture.name}.name`);
+          const name = nameCapture ? nameCapture.node.text : this.bestNodeName(node);
+          
+          const symbol = this.makeSymbol(
+            filepath,
+            node,
+            kind === 'call' && /^use[A-Z0-9]/.test(name || '') ? 'hook' : kind,
+            name,
+            this.isExported(node)
+          );
+          
+          if (symbol) {
+            // For imports, try to find the source
+            if (kind === 'import') {
+              const sourceCapture = match.captures.find((c: any) => c.name === 'import.source');
+              if (sourceCapture) {
+                symbol.importedFrom = sourceCapture.node.text.replace(/^['"]|['"]$/g, '');
+              }
+            }
+            symbols.push(symbol);
+          }
+        }
       }
-    });
+    }
 
     return symbols;
+  }
+
+  private isExported(node: any): boolean {
+    const parent = node.parent;
+    return (
+      parent?.type === 'export_statement' ||
+      parent?.type === 'export_declaration' ||
+      (parent?.type === 'lexical_declaration' && parent.parent?.type === 'export_statement')
+    );
   }
 
   private symbolForNode(filepath: string, node: any): SymbolReference | null {

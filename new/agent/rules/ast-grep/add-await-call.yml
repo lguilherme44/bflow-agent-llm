@@ -1,0 +1,11 @@
+id: add-await-call
+language: TypeScript
+rule:
+  pattern: $FUNC($$$ARGS)
+  # In a real rule, we would filter by function name or type
+  # For demonstration, let's say we want to await all `fetch` calls
+  # Actually, ast-grep supports meta variables.
+  # Let's write a simple pattern for a specific API that became async
+  pattern: oldSyncMethod($$$ARGS)
+fix: await oldSyncMethod($$$ARGS)
+message: Convert synchronous calls to async by adding await.

@@ -1,3 +1,4 @@
+import { Span } from '@opentelemetry/api';
 import { ReActAgent, ReActConfig } from './react-loop.js';
 import { AgentState, ResearchBrief } from '../types/index.js';
 import { createTool } from '../tools/schema.js';
@@ -77,9 +78,9 @@ export class ResearchAgent {
     });
   }
 
-  async run(task: string, existingState?: AgentState): Promise<{ state: AgentState; brief: ResearchBrief | null }> {
+  async run(task: string, existingState?: AgentState, parentSpan?: Span): Promise<{ state: AgentState; brief: ResearchBrief | null }> {
     const researchTask = `Research the following task and provide a ResearchBrief:\n\n${task}`;
-    const state = await this.reactAgent.run(researchTask, existingState);
+    const state = await this.reactAgent.run(researchTask, existingState, parentSpan);
 
     let brief: ResearchBrief | null = null;
     // Look for the submit_research_brief in tool history or wait for complete_task?

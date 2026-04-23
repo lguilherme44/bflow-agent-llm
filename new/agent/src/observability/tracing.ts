@@ -1,4 +1,4 @@
-import { Tracer, Span, SpanStatusCode, SpanKind } from '@opentelemetry/api';
+import { Tracer, Span, SpanStatusCode, SpanKind, trace, context } from '@opentelemetry/api';
 import {
   BasicTracerProvider,
   SimpleSpanProcessor,
@@ -110,6 +110,35 @@ export class TracingService {
     span.end();
   }
 
+  // ── Terminal Spans ──────────────────────────────────────────
+
+  startTerminalSpan(command: string, cwd: string): Span {
+    return this.tracer.startSpan(`exec:${command.split(' ')[0]}`, {
+      kind: SpanKind.CLIENT,
+      attributes: {
+        'cmd.command': command,
+        'cmd.cwd': cwd,
+        'component': 'terminal-service',
+      },
+    });
+  }
+
+  recordTerminalResult(span: Span, result: { exitCode: number | null; durationMs: number; timedOut: boolean }): void {
+    span.setAttributes({
+      'cmd.exit_code': result.exitCode ?? -1,
+      'cmd.duration_ms': result.durationMs,
+      'cmd.timed_out': result.timedOut,
+    });
+
+    span.setStatus(
+      result.exitCode === 0
+        ? { code: SpanStatusCode.OK }
+        : { code: SpanStatusCode.ERROR, message: `Command failed with exit code ${result.exitCode}` }
+    );
+
+    span.end();
+  }
+
   // ── LLM Spans ───────────────────────────────────────────────
 
   startLLMSpan(provider: string, model: string, taskKind: LLMTaskKind = 'general'): Span {
@@ -151,15 +180,52 @@ export class TracingService {
 
   // ── Agent-level spans ───────────────────────────────────────
 
-  startAgentSpan(task: string, agentId: string): Span {
-    return this.tracer.startSpan(`agent:run`, {
+  startAgentSpan(task: string, agentId: string, parentSpan?: Span): Span {
+    const options = {
       kind: SpanKind.INTERNAL,
       attributes: {
         'agent.id': agentId,
         'agent.task': task.slice(0, 200),
         'component': 'react-loop',
       },
+    };
+
+    if (parentSpan) {
+      return this.tracer.startSpan(`agent:run`, options, this.getContext(parentSpan));
+    }
+    return this.tracer.startSpan(`agent:run`, options);
+  }
+
+  // ── Orchestrator spans ──────────────────────────────────────
+
+  startOrchestratorSpan(task: string, agentId: string): Span {
+    return this.tracer.startSpan(`orchestrator:run`, {
+      kind: SpanKind.SERVER,
+      attributes: {
+        'agent.id': agentId,
+        'agent.task': task.slice(0, 200),
+        'component': 'orchestrator',
+      },
     });
+  }
+
+  startPhaseSpan(phaseName: string, parentSpan?: Span): Span {
+    const options = {
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        'orchestrator.phase': phaseName,
+        'component': 'orchestrator',
+      },
+    };
+
+    if (parentSpan) {
+      return this.tracer.startSpan(`phase:${phaseName}`, options, this.getContext(parentSpan));
+    }
+    return this.tracer.startSpan(`phase:${phaseName}`, options);
+  }
+
+  private getContext(span: Span) {
+    return trace.setSpan(context.active(), span);
   }
 
   // ── Test helpers ────────────────────────────────────────────

@@ -1,4 +1,4 @@
-import { Lang, parse } from '@ast-grep/napi';
+import { Lang, parse, SgNode } from '@ast-grep/napi';
 import { CodeLanguage, TextPatch } from '../types/index.js';
 import { detectLanguage, rangeFromOffsets } from './source.js';
 
@@ -24,7 +24,7 @@ export class AstGrepService {
     }
 
     const root = parse(lang, content).root();
-    return root.findAll(pattern).map((node) => ({
+    return root.findAll({ rule: { pattern } }).map((node) => ({
       filepath,
       kind: String(node.kind()),
       text: node.text(),
@@ -49,7 +49,7 @@ export class AstGrepService {
     }
 
     const root = parse(lang, content).root();
-    const matches = root.findAll(pattern);
+    const matches = root.findAll({ rule: { pattern } });
     if (matches.length === 0) {
       return {
         matches: [],
@@ -61,7 +61,8 @@ export class AstGrepService {
     const searchMatches: StructuralSearchMatch[] = [];
     const patches: TextPatch[] = [];
     for (const node of matches) {
-      const edit = node.replace(replacement);
+      const interpolated = this.interpolate(replacement, node);
+      const edit = node.replace(interpolated);
       const range = rangeFromOffsets(content, edit.startPos, edit.endPos);
       searchMatches.push({
         filepath,
@@ -78,6 +79,25 @@ export class AstGrepService {
     }
 
     return { matches: searchMatches, patches };
+  }
+
+  private interpolate(replacement: string, node: SgNode): string {
+    return replacement.replace(/\${1,3}\w+/g, (match) => {
+      if (match.startsWith('$$$')) {
+        const name = match.slice(3);
+        const m = node.getMultipleMatches(name);
+        const texts = m.map((n) => n.text());
+        if (texts.some((t) => t.includes(','))) {
+          return texts.join('').replace(/,(?!\s)/g, ', ');
+        }
+        return texts.join(', ');
+      } else if (match.startsWith('$')) {
+        const name = match.slice(1);
+        const m = node.getMatch(name);
+        return m ? m.text() : match;
+      }
+      return match;
+    });
   }
 
   private toAstGrepLanguage(language: CodeLanguage): Lang | undefined {

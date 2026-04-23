@@ -47,7 +47,11 @@ export class LLMResponseParser {
       return fenced[1];
     }
 
-    const trimmed = content.trim();
+    // Suporte para o formato <|message|>{"key":"value"}
+    const messageTag = content.match(/<\|message\|>\s*([\s\S]*)/i);
+    const contentToSearch = messageTag?.[1] ?? content;
+
+    const trimmed = contentToSearch.trim();
     if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
       return trimmed;
     }
@@ -93,13 +97,19 @@ export class LLMResponseParser {
 
   private static parseFinal(parsed: Record<string, unknown>): LLMFinalResponse | undefined {
     const rawFinal = parsed.final;
-    if (!isRecord(rawFinal)) {
-      return undefined;
+    if (isRecord(rawFinal)) {
+        const status = rawFinal.status === 'failure' || rawFinal.status === 'needs_human' ? rawFinal.status : 'success';
+        const summary = typeof rawFinal.summary === 'string' ? rawFinal.summary : 'Task finished.';
+        return { status, summary };
     }
 
-    const status = rawFinal.status === 'failure' || rawFinal.status === 'needs_human' ? rawFinal.status : 'success';
-    const summary = typeof rawFinal.summary === 'string' ? rawFinal.summary : 'Task finished.';
-    return { status, summary };
+    // Suporte para resumo no topo do objeto (comum em modelos menores)
+    if (typeof parsed.summary === 'string' && !parsed.tool && !parsed.toolCalls) {
+        const status = parsed.status === 'failure' ? 'failure' : 'success';
+        return { status, summary: parsed.summary };
+    }
+
+    return undefined;
   }
 }
 

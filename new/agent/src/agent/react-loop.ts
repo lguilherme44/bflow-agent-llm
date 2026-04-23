@@ -29,7 +29,7 @@ export interface ReActConfig {
   executorHooks?: ToolExecutorHooks;
   humanApprovalCallback?: (toolCall: ToolCall, reason: string) => Promise<boolean>;
   humanApprovalPolicy?: (toolCall: ToolCall, state: AgentState) => string | undefined;
-  onUpdate?: (event: { type: string; role?: string; content?: string; usage?: any }) => void;
+  onUpdate?: (event: { type: string; role?: string; content?: string; message?: string; usage?: any }) => void;
 }
 
 export interface VerificationResult {
@@ -106,9 +106,9 @@ export class ReActAgent {
     };
   }
 
-  async run(task: string, existingState?: AgentState): Promise<AgentState> {
+  async run(task: string, existingState?: AgentState, parentSpan?: Span): Promise<AgentState> {
     let state = existingState ?? AgentStateMachine.create(task);
-    const agentSpan = this.config.tracing?.startAgentSpan(task, state.id);
+    const agentSpan = this.config.tracing?.startAgentSpan(task, state.id, parentSpan);
     await this.config.checkpointManager.checkpoint(state);
 
     try {
@@ -187,7 +187,7 @@ export class ReActAgent {
     return state;
   }
 
-  async resume(agentId: string): Promise<AgentState> {
+  async resume(agentId: string, parentSpan?: Span): Promise<AgentState> {
     const state = await this.config.checkpointManager.resumeFromCheckpoint(agentId);
     if (!state) {
       throw new Error(`Checkpoint ${agentId} not found`);
@@ -197,7 +197,7 @@ export class ReActAgent {
       throw new Error('Restored state does not have a current task');
     }
 
-    return this.run(state.currentTask, state);
+    return this.run(state.currentTask, state, parentSpan);
   }
 
   private async observe(state: AgentState): Promise<AgentState> {
@@ -285,7 +285,7 @@ export class ReActAgent {
       if (approvalReason) {
         if (approvalReason.startsWith('BLOCKED:')) {
           next = AgentStateMachine.fail(next, `Action blocked by security policy: ${approvalReason.replace('BLOCKED: ', '')}`);
-          this.config.onUpdate?.({ type: 'error', content: `Ação bloqueada por política de segurança: ${approvalReason}` });
+          this.config.onUpdate?.({ type: 'error', message: `Acao bloqueada por politica de seguranca: ${approvalReason}` });
           return next;
         }
         next = AgentStateMachine.requestHumanApproval(next, toolCall, approvalReason);
@@ -329,24 +329,43 @@ export class ReActAgent {
       return { terminal: false, state };
     }
 
-    if ((lastExecution.call.toolName === 'complete_task' || typeof (lastExecution.result.data as any)?.completed === 'boolean') && lastExecution.result.success) {
-      const data = lastExecution.result.data as any;
-      
-      // Explicit completion flag from a custom tool
-      if (data?.completed === true) {
+    if (lastExecution.result.success) {
+      const data = lastExecution.result.data;
+      const completedFlag = extractCompletedFlag(data);
+
+      if (completedFlag === true) {
+        if (lastExecution.call.toolName === 'complete_task') {
+          const summary = extractSummary(data) ?? 'Task completed through complete_task.';
+          const completionStatus = extractCompletionStatus(data);
+          return {
+            terminal: true,
+            state:
+              completionStatus === 'failure'
+                ? AgentStateMachine.fail(state, summary)
+                : AgentStateMachine.complete(state, summary),
+          };
+        }
+
         return {
           terminal: true,
-          state: AgentStateMachine.complete(state, 'Task completed through specialized completion tool.'),
+          state: AgentStateMachine.complete(
+            state,
+            extractSummary(data) ?? 'Task completed through specialized completion tool.'
+          ),
         };
       }
 
-      // Legacy complete_task logic
       if (lastExecution.call.toolName === 'complete_task') {
-        const summary = extractSummary(data) ?? 'Task completed through complete_task.';
-        return {
-          terminal: true,
-          state: AgentStateMachine.complete(state, summary),
-        };
+        const blockedSummary =
+          extractSummary(data) ??
+          extractErrorMessage(data) ??
+          'Task completion was blocked by validation.';
+        const next = AgentStateMachine.addMessage(state, {
+          role: 'system',
+          content: `Completion gate blocked finalize step: ${blockedSummary}`,
+          timestamp: new Date().toISOString(),
+        });
+        return { terminal: false, state: next };
       }
     }
 
@@ -467,8 +486,16 @@ export class ReActAgent {
   }
 
   private buildSystemPrompt(): string {
+    const now = new Date();
+    const days = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+    const dayName = days[now.getDay()];
+    const dateStr = now.toLocaleDateString('pt-BR');
+    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const currentContext = `### CONTEXTO TEMPORAL\n- Hoje é ${dayName}, ${dateStr}\n- Hora atual: ${timeStr}`;
+
     return [
       'You are a ReAct software engineering agent.',
+      currentContext,
       'Cycle contract: observe context, think with a short JSON action, act with tools, verify the result.',
       'CRITICAL: You must ALWAYS respond with a JSON object. If you want to "think", include a "thought" field inside the JSON.',
       'JSON Structure example:',
@@ -492,6 +519,36 @@ function extractSummary(data: JsonValue): string | undefined {
     const summary = data.summary;
     if (typeof summary === 'string') {
       return summary;
+    }
+  }
+  return undefined;
+}
+
+function extractCompletionStatus(data: JsonValue): 'success' | 'failure' | undefined {
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    const status = data.status;
+    if (status === 'success' || status === 'failure') {
+      return status;
+    }
+  }
+  return undefined;
+}
+
+function extractCompletedFlag(data: JsonValue): boolean | undefined {
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    const completed = data.completed;
+    if (typeof completed === 'boolean') {
+      return completed;
+    }
+  }
+  return undefined;
+}
+
+function extractErrorMessage(data: JsonValue): string | undefined {
+  if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
+    const error = data.error;
+    if (typeof error === 'string') {
+      return error;
     }
   }
   return undefined;

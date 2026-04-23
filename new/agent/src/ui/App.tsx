@@ -1,13 +1,20 @@
-import { useState, useEffect, useMemo, memo } from 'react';
-import { Text, Box, useStdout, useInput, useApp } from 'ink';
+import {
+  memo,
+  startTransition,
+  useDeferredValue,
+  useEffect,
+  useEffectEvent,
+  useState,
+} from 'react';
+import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 import { OrchestratorAgent, OrchestratorEvent } from '../agent/orchestrator.js';
-import { RiskPolicyEngine } from '../utils/risk-engine.js';
+import { RiskEvaluation } from '../utils/risk-engine.js';
 
 interface AppProps {
   orchestrator: OrchestratorAgent;
-  initialTask: string;
+  initialTask?: string;
 }
 
 interface DisplayMessage {
@@ -16,167 +23,387 @@ interface DisplayMessage {
   timestamp: string;
 }
 
-const MessageRow = memo(({ m, width }: { m: DisplayMessage; width: number }) => {
-  const cleanContent = m.content.replace(/\r?\n|\r/g, ' ').replace(/\s+/g, ' ').trim();
-  const timestamp = m.timestamp.padEnd(10);
-  const role = `[${m.role.toUpperCase()}]`.padEnd(12);
-  const contentWidth = width - timestamp.length - role.length - 2;
+interface PendingApprovalState {
+  toolCallId: string;
+  toolName: string;
+  args: Record<string, unknown>;
+  risk?: RiskEvaluation;
+}
+
+type AppStatus = 'running' | 'completed' | 'error' | 'idle';
+
+const PHASE_ORDER = ['Research', 'Planning', 'Execution', 'Finalized'] as const;
+const PHASE_LABELS: Record<string, string> = {
+  Ready: 'Pronto',
+  Preparing: 'Preparando',
+  Research: 'Pesquisa',
+  Planning: 'Planejamento',
+  Execution: 'Execucao',
+  Approval: 'Aprovacao',
+  Finalized: 'Entrega',
+  Done: 'Concluido',
+  Chat: 'Chat',
+};
+
+const STATUS_META: Record<
+  AppStatus,
+  { label: string; color: 'black' | 'white'; backgroundColor: 'green' | 'red' | 'yellow' | 'white' }
+> = {
+  idle: { label: 'PRONTO', color: 'black', backgroundColor: 'white' },
+  running: { label: 'EM ANDAMENTO', color: 'black', backgroundColor: 'yellow' },
+  completed: { label: 'CONCLUIDO', color: 'black', backgroundColor: 'green' },
+  error: { label: 'ERRO', color: 'white', backgroundColor: 'red' },
+};
+
+const ROLE_META = {
+  system: { label: 'SISTEMA', color: 'cyan' as const },
+  assistant: { label: 'AGENTE', color: 'green' as const },
+  user: { label: 'VOCE', color: 'yellow' as const },
+  tool: { label: 'FERRAMENTA', color: 'magenta' as const },
+};
+
+const FINAL_RESULT_PREFIX = 'RESUMO FINAL:';
+const MESSAGE_BUFFER_SIZE = 80;
+
+function nowLabel() {
+  return new Date().toLocaleTimeString('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function compactWhitespace(value: string) {
+  return value.replace(/\r?\n|\r/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function trimToLength(value: string, maxLength: number) {
+  if (value.length <= maxLength) {
+    return value;
+  }
+
+  return `${value.slice(0, Math.max(maxLength - 3, 0))}...`;
+}
+
+function formatContent(content: string) {
+  const normalized = content.trim();
+
+  try {
+    if (normalized.startsWith('{')) {
+      const parsed = JSON.parse(normalized) as { thought?: string; action?: string; summary?: string };
+
+      if (parsed.summary) {
+        return compactWhitespace(parsed.summary);
+      }
+
+      if (parsed.action) {
+        return `Acao: ${compactWhitespace(parsed.action)}`;
+      }
+
+      if (parsed.thought) {
+        return `Raciocinio: ${compactWhitespace(parsed.thought)}`;
+      }
+    }
+  } catch {
+    return compactWhitespace(content);
+  }
+
+  return compactWhitespace(content);
+}
+
+function summarizeArgs(args: Record<string, unknown>) {
+  const serialized = JSON.stringify(args);
+  if (!serialized) {
+    return '{}';
+  }
+
+  return trimToLength(compactWhitespace(serialized), 180);
+}
+
+function appendMessage(previous: DisplayMessage[], next: DisplayMessage) {
+  return [...previous, next].slice(-MESSAGE_BUFFER_SIZE);
+}
+
+function appendPhase(previous: string[], phase: string) {
+  if (previous.includes(phase)) {
+    return previous;
+  }
+
+  return [...previous, phase];
+}
+
+function horizontalRule(width: number) {
+  return '-'.repeat(Math.max(width, 1));
+}
+
+const StatusBadge = memo(({ status }: { status: AppStatus }) => {
+  const meta = STATUS_META[status];
+
+  return (
+    <Text bold color={meta.color} backgroundColor={meta.backgroundColor}>
+      {' '}
+      {meta.label}
+      {' '}
+    </Text>
+  );
+});
+
+StatusBadge.displayName = 'StatusBadge';
+
+const SectionTitle = memo(({ title, meta }: { title: string; meta?: string }) => (
+  <Box justifyContent="space-between" marginBottom={1}>
+    <Text bold color="cyan">
+      {title}
+    </Text>
+    {meta ? <Text dimColor>{meta}</Text> : null}
+  </Box>
+));
+
+SectionTitle.displayName = 'SectionTitle';
+
+const PhaseTrack = memo(
+  ({
+    currentPhase,
+    completedPhases,
+    compact,
+  }: {
+    currentPhase: string;
+    completedPhases: string[];
+    compact: boolean;
+  }) => {
+    if (currentPhase === 'Chat' || completedPhases.includes('Chat')) {
+      return (
+        <Text color="blue" bold>
+          {'[>] Chat direto ativo'}
+        </Text>
+      );
+    }
+
+    const renderItem = (phase: (typeof PHASE_ORDER)[number]) => {
+      const isDone = completedPhases.includes(phase);
+      const isActive = currentPhase === phase;
+      const marker = isDone ? '[x]' : isActive ? '[>]' : '[ ]';
+      const color = isDone ? 'green' : isActive ? 'yellow' : 'gray';
+
+      return (
+        <Text key={phase} color={color} bold={isDone || isActive}>
+          {marker} {PHASE_LABELS[phase]}
+        </Text>
+      );
+    };
+
+    if (compact) {
+      return (
+        <Box flexDirection="column">
+          {PHASE_ORDER.map((phase) => (
+            <Box key={phase}>{renderItem(phase)}</Box>
+          ))}
+        </Box>
+      );
+    }
+
+    return (
+      <Box>
+        {PHASE_ORDER.map((phase, index) => (
+          <Box key={phase} marginRight={index === PHASE_ORDER.length - 1 ? 0 : 1}>
+            {renderItem(phase)}
+            {index < PHASE_ORDER.length - 1 ? <Text dimColor>{' -> '}</Text> : null}
+          </Box>
+        ))}
+      </Box>
+    );
+  }
+);
+
+PhaseTrack.displayName = 'PhaseTrack';
+
+const ActivityRow = memo(({ message, width }: { message: DisplayMessage; width: number }) => {
+  const roleMeta = ROLE_META[message.role as keyof typeof ROLE_META] ?? ROLE_META.system;
+  const timestampWidth = 6;
+  const roleWidth = 12;
+  const contentWidth = Math.max(width - timestampWidth - roleWidth - 2, 12);
 
   return (
     <Box width={Math.max(width, 0)} height={1}>
-      <Text color="gray">{timestamp}</Text>
-      <Text bold color={m.role === 'system' ? 'blue' : m.role === 'assistant' ? 'green' : 'white'}>
-        {role}
-      </Text>
-      <Box width={Math.max(contentWidth, 1)}>
-        <Text color="white" wrap="truncate-end">{cleanContent}</Text>
+      <Box width={timestampWidth}>
+        <Text color="gray">{message.timestamp}</Text>
+      </Box>
+      <Box width={roleWidth}>
+        <Text color={roleMeta.color} bold>
+          {roleMeta.label.padEnd(roleWidth - 1)}
+        </Text>
+      </Box>
+      <Box width={contentWidth}>
+        <Text wrap="truncate-end">{message.content}</Text>
       </Box>
     </Box>
   );
 });
 
-MessageRow.displayName = 'MessageRow';
+ActivityRow.displayName = 'ActivityRow';
 
-export const App = ({ orchestrator, initialTask }: AppProps) => {
+export const App = ({ orchestrator, initialTask = '' }: AppProps) => {
   const { stdout } = useStdout();
+  const { exit } = useApp();
+
   const [dimensions, setDimensions] = useState({
     columns: stdout?.columns || 100,
-    rows: stdout?.rows || 30
+    rows: stdout?.rows || 30,
   });
-
-  useEffect(() => {
-    const handleResize = () => {
-      setDimensions({
-        columns: stdout?.columns || 100,
-        rows: stdout?.rows || 30
-      });
-    };
-
-    stdout?.on('resize', handleResize);
-    return () => {
-      stdout?.off('resize', handleResize);
-    };
-  }, [stdout]);
-
-  const terminalWidth = Math.max(dimensions.columns - 4, 20);
-  // Cap height to 28 to avoid flickering in fullscreen terminals while remaining responsive for small ones
-  const terminalHeight = Math.min(Math.max(dimensions.rows - 2, 15), 28);
-  
-  const { exit } = useApp();
   const [query, setQuery] = useState('');
+  const [activeTask, setActiveTask] = useState(initialTask.trim());
   const [isRunning, setIsRunning] = useState(false);
-  const [status, setStatus] = useState<'running' | 'completed' | 'error' | 'idle'>('idle');
+  const [status, setStatus] = useState<AppStatus>('idle');
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
-  const [currentPhase, setCurrentPhase] = useState<string>('Ready');
+  const [currentPhase, setCurrentPhase] = useState('Ready');
+  const [completedPhases, setCompletedPhases] = useState<string[]>([]);
   const [usage, setUsage] = useState({ totalTokens: 0 });
   const [error, setError] = useState<string | null>(null);
   const [finalResult, setFinalResult] = useState<string | null>(null);
-  const [pendingApproval, setPendingApproval] = useState<{
-    toolCallId: string;
-    toolName: string;
-    args: any;
-    risk?: any;
-  } | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
+  const [lastEventAt, setLastEventAt] = useState<string | null>(null);
+  const [hasAutoStarted, setHasAutoStarted] = useState(false);
 
-  const riskEngine = useMemo(() => new RiskPolicyEngine(), []);
+  const deferredMessages = useDeferredValue(messages);
+  const deferredFinalResult = useDeferredValue(finalResult);
 
-  const formatContent = useMemo(() => (content: string): string => {
-    try {
-      if (content.trim().startsWith('{')) {
-        const parsed = JSON.parse(content);
-        if (parsed.thought) return `Pensando: ${parsed.thought}`;
-        if (parsed.action) return `Ação: ${parsed.action}`;
-        if (parsed.summary) return parsed.summary;
-      }
-      return content;
-    } catch {
-      return content;
+  const outerWidth = dimensions.columns || 100;
+  const contentWidth = Math.max(outerWidth - 6, 24);
+  const frameHeight = Math.max(Math.min((dimensions.rows || 30) - 1, 34), 20);
+  const compactLayout = contentWidth < 90;
+  const visibleMessageCount = Math.max(
+    Math.min(
+      frameHeight -
+        (pendingApproval ? 17 : 14) -
+        (deferredFinalResult ? (compactLayout ? 4 : 5) : 3) -
+        (status === 'error' && error ? 3 : 0),
+      12
+    ),
+    4
+  );
+  const visibleMessages = deferredMessages.slice(-visibleMessageCount);
+
+  const syncDimensions = useEffectEvent(() => {
+    setDimensions({
+      columns: stdout?.columns || 100,
+      rows: stdout?.rows || 30,
+    });
+  });
+
+  useEffect(() => {
+    stdout?.on('resize', syncDimensions);
+
+    return () => {
+      stdout?.off('resize', syncDimensions);
+    };
+  }, [stdout]);
+
+  const submitTask = useEffectEvent(async (task: string) => {
+    const normalizedTask = compactWhitespace(task);
+    if (!normalizedTask || isRunning) {
+      return;
     }
-  }, []);
 
-  const handleTaskSubmit = async (task: string) => {
-    if (!task.trim() || isRunning) return;
-    
+    const timestamp = nowLabel();
+
+    setActiveTask(normalizedTask);
     setIsRunning(true);
     setStatus('running');
+    setCurrentPhase('Preparing');
+    setCompletedPhases([]);
     setQuery('');
     setFinalResult(null);
     setError(null);
-    
-    setMessages(prev => [...prev, {
-      role: 'user',
-      content: `> ${task}`,
-      timestamp: new Date().toLocaleTimeString().split(' ')[0]
-    }].slice(-12));
+    setPendingApproval(null);
+    setLastEventAt(timestamp);
+    setMessages((previous) =>
+      appendMessage(previous, {
+        role: 'user',
+        content: normalizedTask,
+        timestamp,
+      })
+    );
 
     try {
-      await orchestrator.run(task);
-    } catch (err: any) {
+      await orchestrator.run(normalizedTask);
+    } catch (submissionError) {
       setStatus('error');
-      setError(err.message);
+      setError(submissionError instanceof Error ? submissionError.message : String(submissionError));
     } finally {
       setIsRunning(false);
     }
-  };
+  });
 
-  useEffect(() => {
-    let isMounted = true;
-
-    orchestrator.setUpdateCallback((event: OrchestratorEvent) => {
-      if (!isMounted) return;
+  const handleOrchestratorEvent = useEffectEvent((event: OrchestratorEvent) => {
+    startTransition(() => {
+      setLastEventAt(nowLabel());
 
       switch (event.type) {
         case 'phase_start':
           setCurrentPhase(event.phase);
           break;
         case 'phase_complete':
+          setCompletedPhases((previous) => appendPhase(previous, event.phase));
           if (event.phase === 'Finalized') {
             setStatus('completed');
             setCurrentPhase('Done');
+            setPendingApproval(null);
           }
           break;
-        case 'message_added':
-          const now = new Date().toLocaleTimeString().split(' ')[0];
+        case 'message_added': {
           const formatted = formatContent(event.content);
-          
-          if (formatted.startsWith('RESUMO FINAL: ')) {
-            setFinalResult(formatted.replace('RESUMO FINAL: ', ''));
+          if (!formatted) {
+            break;
           }
 
-          setMessages(prev => {
-            const next = [...prev, { 
-              role: event.role, 
+          if (formatted.startsWith(FINAL_RESULT_PREFIX)) {
+            setFinalResult(formatted.replace(FINAL_RESULT_PREFIX, '').trim());
+            break;
+          }
+
+          setMessages((previous) =>
+            appendMessage(previous, {
+              role: event.role,
               content: formatted,
-              timestamp: now
-            }];
-            return next.slice(-12);
-          });
+              timestamp: nowLabel(),
+            })
+          );
           break;
+        }
         case 'usage_update':
           setUsage({ totalTokens: event.usage.totalTokens });
           break;
         case 'error':
           setStatus('error');
           setError(event.message);
+          setPendingApproval(null);
           break;
         case 'human_approval_request':
-          const evaluation = riskEngine.evaluateToolCall(event.toolName, event.args);
+          setCurrentPhase('Approval');
           setPendingApproval({
             toolCallId: event.toolCallId,
             toolName: event.toolName,
-            args: event.args,
-            risk: evaluation
+            args: event.args as Record<string, unknown>,
+            risk: event.riskEvaluation as RiskEvaluation | undefined,
           });
           break;
       }
     });
+  });
 
-    if (initialTask) {
-      handleTaskSubmit(initialTask);
+  useEffect(() => {
+    orchestrator.setUpdateCallback(handleOrchestratorEvent);
+  }, [orchestrator]);
+
+  useEffect(() => {
+    if (hasAutoStarted) {
+      return;
     }
-    
-    return () => { isMounted = false; };
-  }, [orchestrator, initialTask, formatContent, riskEngine]);
+
+    setHasAutoStarted(true);
+    if (initialTask.trim()) {
+      void submitTask(initialTask);
+    }
+  }, [hasAutoStarted, initialTask]);
 
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {
@@ -184,133 +411,227 @@ export const App = ({ orchestrator, initialTask }: AppProps) => {
       return;
     }
 
-    if (!pendingApproval) return;
+    if (!pendingApproval) {
+      return;
+    }
 
     if (input === 'a' || input === 'A') {
       orchestrator.resolveApproval(true);
       setPendingApproval(null);
-    } else if (input === 'r' || input === 'R') {
+    }
+
+    if (input === 'r' || input === 'R') {
       orchestrator.resolveApproval(false);
       setPendingApproval(null);
     }
   });
 
-  const horizontalLine = '─'.repeat(Math.max(terminalWidth, 0));
+  const phaseLabel = PHASE_LABELS[currentPhase] ?? currentPhase;
+  const summaryText = deferredFinalResult
+    ? trimToLength(compactWhitespace(deferredFinalResult), compactLayout ? 220 : 360)
+    : status === 'error' && error
+      ? trimToLength(compactWhitespace(error), compactLayout ? 180 : 240)
+      : isRunning
+        ? 'O agente esta executando a tarefa e atualizando o painel em tempo real.'
+        : activeTask
+          ? 'Tarefa pronta para nova iteracao. Voce pode enviar outra solicitacao abaixo.'
+          : 'Painel pronto. Digite uma tarefa para iniciar a execucao do agente.';
+  const summaryTone: 'red' | 'green' | 'blue' = status === 'error' ? 'red' : deferredFinalResult ? 'green' : 'blue';
+  const summaryTitle = deferredFinalResult ? 'Resumo final' : status === 'error' ? 'Falha de execucao' : 'Visao geral';
 
   return (
-    <Box flexDirection="column" borderStyle="round" borderColor="cyan" paddingX={2} paddingY={1} width={dimensions.columns} height={terminalHeight}>
-      <Box marginBottom={1} justifyContent="center" height={1}>
-        <Text bold color="cyan" inverse> AGENT OS v1.0 </Text>
-      </Box>
-
-      <Box marginBottom={1} width={terminalWidth} height={1}>
-        <Text bold>Tarefa: </Text>
-        <Text italic color="white" wrap="truncate-end">{initialTask}</Text>
-      </Box>
-
-      <Box marginBottom={1} justifyContent="space-between" height={1}>
-        <Box>
-          <Text bold>STATUS: </Text>
-          {status === 'running' && <Text color="yellow">RUNNING</Text>}
-          {status === 'completed' && <Text color="green">COMPLETED</Text>}
-          {status === 'error' && <Text color="red">ERROR</Text>}
-          
-          <Text bold>  PHASE: </Text>
-          <Text color="blue">{currentPhase.toUpperCase()}</Text>
-          {status === 'running' && (
-            <Box marginLeft={1}>
-              <Text color="blue"><Spinner type="dots" /></Text>
-            </Box>
-          )}
+    <Box
+      flexDirection="column"
+      borderStyle="round"
+      borderColor={status === 'error' ? 'red' : 'cyan'}
+      paddingX={2}
+      paddingY={1}
+      width={outerWidth}
+      height={frameHeight}
+    >
+      <Box
+        flexDirection={compactLayout ? 'column' : 'row'}
+        justifyContent="space-between"
+        marginBottom={1}
+      >
+        <Box flexDirection="column">
+          <Text bold color="cyan">
+            Agent Control Center
+          </Text>
+          <Text dimColor>Interface operacional para execucao assistida de tarefas.</Text>
         </Box>
-        
-        <Box>
-          <Text bold>USAGE: </Text>
-          <Text color="magenta">{usage.totalTokens.toLocaleString()}</Text>
-          <Text dimColor> tokens</Text>
+        <Box
+          flexDirection="column"
+          alignItems={compactLayout ? 'flex-start' : 'flex-end'}
+          marginTop={compactLayout ? 1 : 0}
+        >
+          <StatusBadge status={status} />
+          <Text dimColor>{lastEventAt ? `Atualizado as ${lastEventAt}` : 'Sessao pronta'}</Text>
         </Box>
       </Box>
 
-      <Text color="gray">{horizontalLine}</Text>
+      <Text color="gray">{horizontalRule(contentWidth)}</Text>
 
-      {finalResult && (
-        <Box flexDirection="column" borderStyle="double" borderColor="green" paddingX={1} marginY={1} width={terminalWidth} maxHeight={10}>
-          <Box marginBottom={0}>
-            <Text bold color="green">ASSISTANT RESPONSE</Text>
-          </Box>
-          <Text color="white" wrap="wrap">{finalResult}</Text>
-        </Box>
-      )}
+      <Box marginTop={1} flexDirection="column">
+        <SectionTitle title="Tarefa ativa" meta={activeTask ? undefined : 'Aguardando entrada'} />
+        <Text wrap="truncate-end">{activeTask || 'Nenhuma tarefa em andamento no momento.'}</Text>
+      </Box>
 
-      {status === 'error' && error && (
-        <Box borderStyle="single" borderColor="red" paddingX={1} marginBottom={1} height={4} flexDirection="column" width={terminalWidth}>
-          <Text color="red" bold>CRITICAL ERROR:</Text>
-          <Text color="red" wrap="wrap">{error}</Text>
+      <Box
+        marginTop={1}
+        flexDirection={compactLayout ? 'column' : 'row'}
+        justifyContent="space-between"
+      >
+        <Box flexDirection="column" marginRight={compactLayout ? 0 : 2}>
+          <Text bold>
+            Fase atual:{' '}
+            <Text color="yellow">{phaseLabel}</Text>
+            {status === 'running' ? (
+              <Text color="yellow">
+                {' '}
+                <Spinner type="dots" />
+              </Text>
+            ) : null}
+          </Text>
+          <Text dimColor>Fluxo principal do agente durante esta execucao.</Text>
         </Box>
-      )}
 
-      <Box flexDirection="column" flexGrow={1} marginTop={1} width={terminalWidth}>
-        <Box marginBottom={1}>
-          <Text bold color="cyan">ACTIVITY LOG</Text>
+        <Box flexDirection="column" alignItems={compactLayout ? 'flex-start' : 'flex-end'}>
+          <Text bold>
+            Tokens da sessao:{' '}
+            <Text color="magenta">{usage.totalTokens.toLocaleString('pt-BR')}</Text>
+          </Text>
+          <Text dimColor>{messages.length} eventos registrados no buffer visual</Text>
         </Box>
-        {messages.map((m, i) => (
-          <MessageRow key={`${m.timestamp}-${i}`} m={m} width={terminalWidth} />
-        ))}
-        {messages.length === 0 && (
-          <Box justifyContent="center" marginTop={2}>
-            <Text dimColor italic>Iniciando sistemas neurais...</Text>
+      </Box>
+
+      <Box marginTop={1} flexDirection="column">
+        <SectionTitle title="Progresso" />
+        <PhaseTrack currentPhase={currentPhase} completedPhases={completedPhases} compact={compactLayout} />
+      </Box>
+
+      <Box
+        flexDirection="column"
+        borderStyle="round"
+        borderColor={summaryTone}
+        paddingX={1}
+        marginTop={1}
+        width={contentWidth}
+      >
+        <SectionTitle title={summaryTitle} />
+        <Text wrap="wrap">{summaryText}</Text>
+      </Box>
+
+      {status === 'error' && error ? (
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold color="red">
+            Erro atual
+          </Text>
+          <Text color="red" wrap="truncate-end">
+            {compactWhitespace(error)}
+          </Text>
+        </Box>
+      ) : null}
+
+      <Box flexDirection="column" flexGrow={1} marginTop={1}>
+        <SectionTitle
+          title="Atividade"
+          meta={`${visibleMessages.length} de ${deferredMessages.length} eventos visiveis`}
+        />
+        {visibleMessages.length > 0 ? (
+          visibleMessages.map((message, index) => (
+            <ActivityRow
+              key={`${message.timestamp}-${message.role}-${index}`}
+              message={message}
+              width={contentWidth}
+            />
+          ))
+        ) : (
+          <Box justifyContent="center" marginTop={1}>
+            <Text dimColor italic>
+              O painel exibira aqui o historico operacional da tarefa.
+            </Text>
           </Box>
         )}
       </Box>
 
-      <Text color="gray">{horizontalLine}</Text>
+      <Text color="gray">{horizontalRule(contentWidth)}</Text>
 
-      {status !== 'running' && !pendingApproval && (
-        <Box marginTop={0} flexDirection="column">
+      {pendingApproval ? (
+        <Box
+          flexDirection="column"
+          borderStyle="round"
+          borderColor="yellow"
+          paddingX={1}
+          marginTop={1}
+          width={contentWidth}
+        >
+          <SectionTitle title="Aprovacao humana necessaria" meta={pendingApproval.toolCallId} />
           <Box marginBottom={1}>
-            <Text color="cyan" bold>PRÓXIMA TAREFA: </Text>
-            <TextInput 
-              value={query} 
-              onChange={setQuery} 
-              onSubmit={handleTaskSubmit}
-              placeholder="Digite sua próxima solicitação ou CTRL+C para sair..."
-            />
+            <Text>
+              <Text bold>Ferramenta:</Text> <Text color="cyan">{pendingApproval.toolName}</Text>
+            </Text>
           </Box>
-          <Box justifyContent="center" height={1}>
-            <Text color="black" backgroundColor="white" bold> CTRL+C PARA SAIR </Text>
+          <Box marginBottom={1}>
+            <Text wrap="wrap">
+              <Text bold>Argumentos:</Text> {summarizeArgs(pendingApproval.args)}
+            </Text>
+          </Box>
+          {pendingApproval.risk ? (
+            <Box flexDirection="column" marginBottom={1}>
+              <Text bold>
+                Risco:{' '}
+                <Text
+                  color={
+                    pendingApproval.risk.level === 'high' || pendingApproval.risk.level === 'blocked'
+                      ? 'red'
+                      : 'yellow'
+                  }
+                >
+                  {pendingApproval.risk.level.toUpperCase()} ({pendingApproval.risk.score})
+                </Text>
+              </Text>
+              {pendingApproval.risk.reasons.length > 0 ? (
+                pendingApproval.risk.reasons.slice(0, 3).map((reason, index) => (
+                  <Text key={`${reason}-${index}`} dimColor wrap="truncate-end">
+                    - {reason}
+                  </Text>
+                ))
+              ) : (
+                <Text dimColor>Nenhum detalhe adicional de risco foi informado.</Text>
+              )}
+            </Box>
+          ) : null}
+          <Box>
+            <Text color="black" backgroundColor="green" bold>
+              {' '}
+              [A] Aprovar
+              {' '}
+            </Text>
+            <Text>  </Text>
+            <Text color="white" backgroundColor="red" bold>
+              {' '}
+              [R] Rejeitar
+              {' '}
+            </Text>
           </Box>
         </Box>
-      )}
-
-      {pendingApproval && (
-        <Box flexDirection="column" borderStyle="bold" borderColor="yellow" paddingX={1} marginY={1} width={terminalWidth}>
-          <Box justifyContent="center" marginBottom={1}>
-            <Text bold color="yellow" inverse> ⚠ APROVAÇÃO NECESSÁRIA ⚠ </Text>
+      ) : (
+        <Box marginTop={1} flexDirection="column">
+          <Box marginBottom={1}>
+            <Text bold color="cyan">
+              Nova tarefa:{' '}
+            </Text>
+            <TextInput
+              value={query}
+              onChange={setQuery}
+              onSubmit={(value) => {
+                void submitTask(value);
+              }}
+              placeholder="Descreva a proxima tarefa e pressione Enter"
+            />
           </Box>
-          <Box>
-            <Text bold>Ferramenta: </Text>
-            <Text color="cyan">{pendingApproval.toolName}</Text>
-          </Box>
-          <Box>
-            <Text bold>Argumentos: </Text>
-            <Text dimColor>{JSON.stringify(pendingApproval.args).slice(0, 100)}...</Text>
-          </Box>
-          {pendingApproval.risk && (
-            <Box flexDirection="column" marginTop={1}>
-              <Text bold>Risco: </Text>
-              <Text color={pendingApproval.risk.level === 'high' ? 'red' : 'yellow'}>
-                {pendingApproval.risk.level.toUpperCase()} (Score: {pendingApproval.risk.score})
-              </Text>
-              {pendingApproval.risk.reasons.map((r: string, i: number) => (
-                <Text key={i} dimColor>• {r}</Text>
-              ))}
-            </Box>
-          )}
-          <Box marginTop={1} justifyContent="center">
-            <Text backgroundColor="green" color="white" bold> [A]provar </Text>
-            <Text>  </Text>
-            <Text backgroundColor="red" color="white" bold> [R]ejeitar </Text>
-          </Box>
+          <Text dimColor>Enter executa a tarefa atual. Ctrl+C encerra a interface.</Text>
         </Box>
       )}
     </Box>

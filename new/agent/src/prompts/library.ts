@@ -126,6 +126,16 @@ export class PromptLibrary {
       .join('\n\n');
   }
 
+  getCurrentContext(): string {
+    const now = new Date();
+    const days = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
+    const dayName = days[now.getDay()];
+    const dateStr = now.toLocaleDateString('pt-BR');
+    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    
+    return `### CONTEXTO ATUAL\n- Data: ${dateStr} (${dayName})\n- Hora local: ${timeStr}\n- Workspace: ${process.cwd()}`;
+  }
+
   validateStructuredResponse(raw: string): { valid: boolean; error?: string } {
     try {
       const parsed = JSON.parse(raw) as Record<string, unknown>;

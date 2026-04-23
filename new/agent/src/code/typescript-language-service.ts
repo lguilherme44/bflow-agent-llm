@@ -108,6 +108,31 @@ export class TypeScriptLanguageService {
     });
   }
 
+  getCodeFixes(filepath: string, range: SourceRange, errorCodes: number[]): TextPatch[] {
+    const fileName = this.ensureFile(filepath);
+    const content = this.readFile(fileName);
+    const start = positionToIndex(content, range.start);
+    const end = positionToIndex(content, range.end);
+
+    const fixes = this.service.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
+
+    return fixes.flatMap((fix) => {
+      return fix.changes.flatMap((change) => {
+        const changeContent = this.readFile(change.fileName);
+        return change.textChanges.map((textChange) => {
+          const cStart = textChange.span.start;
+          const cEnd = textChange.span.start + textChange.span.length;
+          return {
+            filepath: change.fileName,
+            range: rangeFromOffsets(changeContent, cStart, cEnd),
+            oldText: changeContent.slice(cStart, cEnd),
+            newText: textChange.newText,
+          };
+        });
+      });
+    });
+  }
+
   updateFile(filepath: string, text: string): void {
     const fileName = path.resolve(this.projectRoot, filepath);
     const previous = this.files.get(fileName);

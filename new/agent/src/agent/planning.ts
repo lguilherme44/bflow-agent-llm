@@ -1,3 +1,4 @@
+import { Span } from '@opentelemetry/api';
 import { ReActAgent, ReActConfig } from './react-loop.js';
 import { AgentState, ExecutionPlan, ResearchBrief } from '../types/index.js';
 import { createTool } from '../tools/schema.js';
@@ -94,9 +95,9 @@ export class PlanningAgent {
     });
   }
 
-  async run(task: string, brief: ResearchBrief, existingState?: AgentState): Promise<{ state: AgentState; plan: ExecutionPlan | null }> {
+  async run(task: string, brief: ResearchBrief, existingState?: AgentState, parentSpan?: Span): Promise<{ state: AgentState; plan: ExecutionPlan | null }> {
     const planningTask = `Original Task:\n${task}\n\nResearch Brief:\n${JSON.stringify(brief, null, 2)}\n\nCreate a structured ExecutionPlan for this task.`;
-    const state = await this.reactAgent.run(planningTask, existingState);
+    const state = await this.reactAgent.run(planningTask, existingState, parentSpan);
 
     let plan: ExecutionPlan | null = null;
     

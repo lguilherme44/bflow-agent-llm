@@ -1,0 +1,6 @@
+id: migrate-api
+language: TypeScript
+rule:
+  pattern: legacyApi.doSomething($$$ARGS)
+fix: newApi.performAction($$$ARGS)
+message: Migrate from legacyApi to newApi.

@@ -10,6 +10,8 @@ import {
 import { detectLanguage, hashContent } from '../code/source.js';
 import { TreeSitterParserService } from '../code/tree-sitter-parser.js';
 import { estimateTokensFromText } from '../utils/json.js';
+import lunr from 'lunr';
+import { RankingUtils } from './ranking-utils.js';
 
 export interface RetrieveContextInput {
   task: string;
@@ -30,6 +32,7 @@ export interface RagIndexStats {
 export class LocalRagService {
   private readonly chunks = new Map<string, RetrievalChunk>();
   private readonly fileHashes = new Map<string, string>();
+  private lunrIndex: lunr.Index | null = null;
 
   constructor(
     private readonly workspaceRoot = process.cwd(),
@@ -58,6 +61,8 @@ export class LocalRagService {
         skippedFiles += 1;
       }
     }
+
+    this.rebuildLunrIndex();
 
     return {
       filesIndexed,
@@ -91,16 +96,54 @@ export class LocalRagService {
   }
 
   retrieve(input: RetrieveContextInput): RetrievalResult[] {
-    const queryVector = vectorize(input.task);
-    const queryTerms = Object.keys(queryVector);
     const limit = input.limit ?? 8;
+    const filteredChunks = Array.from(this.chunks.values()).filter((chunk) =>
+      this.matchesFilters(chunk, input.filters)
+    );
 
-    return Array.from(this.chunks.values())
-      .filter((chunk) => this.matchesFilters(chunk, input.filters))
-      .map((chunk) => this.scoreChunk(chunk, queryVector, queryTerms))
-      .filter((result) => result.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, limit);
+    if (filteredChunks.length === 0) return [];
+
+    // 1. Lexical Search (lunr)
+    const lexicalResults: RetrievalChunk[] = [];
+    if (this.lunrIndex) {
+      const results = this.lunrIndex.search(input.task);
+      for (const res of results) {
+        const chunk = this.chunks.get(res.ref);
+        if (chunk && this.matchesFilters(chunk, input.filters)) {
+          lexicalResults.push(chunk);
+        }
+      }
+    }
+
+    // 2. Recency Ranking
+    const recencyResults = [...filteredChunks].sort((a, b) => {
+      const dateA = new Date(a.metadata.modifiedAt).getTime();
+      const dateB = new Date(b.metadata.modifiedAt).getTime();
+      return dateB - dateA;
+    });
+
+    // 3. Centrality Ranking (Simple heuristic: symbols in src > docs > tests)
+    const centralityResults = [...filteredChunks].sort((a, b) => {
+      const scoreA = (a.metadata.owner === 'src' ? 10 : 0) + a.metadata.symbols.length;
+      const scoreB = (b.metadata.owner === 'src' ? 10 : 0) + b.metadata.symbols.length;
+      return scoreB - scoreA;
+    });
+
+    // 4. Combine with RRF
+    const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults]);
+    
+    return combined.slice(0, limit).map(({ item, score }) => {
+      const reasons: string[] = [];
+      if (lexicalResults.includes(item)) reasons.push('lexical match');
+      if (recencyResults.slice(0, 10).includes(item)) reasons.push('recent file');
+      if (centralityResults.slice(0, 10).includes(item)) reasons.push('structural centrality');
+      
+      return {
+        chunk: item,
+        score,
+        reasons
+      };
+    });
   }
 
   getIndexedChunks(): RetrievalChunk[] {
@@ -198,38 +241,7 @@ export class LocalRagService {
       metadata,
       tokensEstimate: estimateTokensFromText(content),
       indexedAt: new Date().toISOString(),
-      vector: vectorize(`${content} ${metadata.symbols.join(' ')} ${metadata.filepath}`),
     };
-  }
-
-  private scoreChunk(
-    chunk: RetrievalChunk,
-    queryVector: Record<string, number>,
-    queryTerms: string[]
-  ): RetrievalResult {
-    const lexicalScore = cosineSimilarity(queryVector, chunk.vector);
-    const symbolScore = queryTerms.filter((term) =>
-      chunk.metadata.symbols.some((symbol) => symbol.toLowerCase().includes(term))
-    ).length;
-    const filepathScore = queryTerms.filter((term) => chunk.metadata.filepath.toLowerCase().includes(term)).length;
-    const recencyScore = recencyBoost(chunk.metadata.modifiedAt);
-    const score = lexicalScore * 100 + symbolScore * 12 + filepathScore * 8 + recencyScore;
-    const reasons: string[] = [];
-
-    if (lexicalScore > 0) {
-      reasons.push(`lexical/vector overlap ${lexicalScore.toFixed(3)}`);
-    }
-    if (symbolScore > 0) {
-      reasons.push(`symbol match x${symbolScore}`);
-    }
-    if (filepathScore > 0) {
-      reasons.push(`filepath match x${filepathScore}`);
-    }
-    if (recencyScore > 0) {
-      reasons.push(`recent file boost ${recencyScore.toFixed(2)}`);
-    }
-
-    return { chunk, score, reasons };
   }
 
   private matchesFilters(chunk: RetrievalChunk, filters: RetrieveContextInput['filters']): boolean {
@@ -290,49 +302,25 @@ export class LocalRagService {
     }
     return symbol.kind === 'function' || symbol.kind === 'method' ? 'symbol' : 'file';
   }
-}
 
-function vectorize(text: string): Record<string, number> {
-  const vector: Record<string, number> = {};
-  for (const term of tokenize(text)) {
-    vector[term] = (vector[term] ?? 0) + 1;
+  private rebuildLunrIndex(): void {
+    const chunks = Array.from(this.chunks.values());
+    this.lunrIndex = lunr(function () {
+      this.ref('id');
+      this.field('content');
+      this.field('filepath');
+      this.field('symbols');
+
+      for (const chunk of chunks) {
+        this.add({
+          id: chunk.id,
+          content: chunk.content,
+          filepath: chunk.metadata.filepath,
+          symbols: chunk.metadata.symbols.join(' '),
+        });
+      }
+    });
   }
-  return vector;
-}
-
-function cosineSimilarity(a: Record<string, number>, b: Record<string, number>): number {
-  let dot = 0;
-  let aNorm = 0;
-  let bNorm = 0;
-
-  for (const value of Object.values(a)) {
-    aNorm += value * value;
-  }
-
-  for (const [term, value] of Object.entries(b)) {
-    bNorm += value * value;
-    dot += (a[term] ?? 0) * value;
-  }
-
-  if (aNorm === 0 || bNorm === 0) {
-    return 0;
-  }
-
-  return dot / (Math.sqrt(aNorm) * Math.sqrt(bNorm));
-}
-
-function tokenize(text: string): string[] {
-  return text
-    .toLowerCase()
-    .replace(/([a-z])([A-Z])/g, '$1 $2')
-    .split(/[^a-z0-9_]+/)
-    .filter((term) => term.length >= 2 && !STOP_WORDS.has(term));
-}
-
-function recencyBoost(modifiedAt: string): number {
-  const ageMs = Date.now() - new Date(modifiedAt).getTime();
-  const ageDays = ageMs / 86_400_000;
-  return Math.max(0, 5 - ageDays / 30);
 }
 
 function isIndexable(filepath: string): boolean {
@@ -357,19 +345,3 @@ function moduleFromPath(workspaceRoot: string, filepath: string): string {
   const relative = path.relative(workspaceRoot, filepath).replace(/\\/g, '/');
   return relative.split('/')[0] || '.';
 }
-
-const STOP_WORDS = new Set([
-  'the',
-  'and',
-  'for',
-  'with',
-  'uma',
-  'para',
-  'com',
-  'que',
-  'this',
-  'that',
-  'from',
-  'import',
-  'export',
-]);

@@ -36,8 +36,29 @@ export class ContextManager {
       messages = this.compactOldMessages(messages, summary);
     }
 
+    messages = this.truncateMessages(messages);
     messages = this.prioritizeToolResults(messages);
     return messages;
+  }
+
+  private truncateMessages(messages: AgentMessage[]): AgentMessage[] {
+    const perMessageLimit = Math.floor(this.config.maxTokensEstimate * 0.7);
+    
+    return messages.map(msg => {
+      const estimate = estimateTokensFromText(msg.content);
+      if (estimate <= perMessageLimit) {
+        return msg;
+      }
+
+      const allowedChars = perMessageLimit * 4;
+      const truncatedContent = msg.content.slice(0, allowedChars) + 
+        `... [Conteúdo truncado por ser muito longo: ${estimate} tokens, limite por mensagem é ${perMessageLimit} tokens]`;
+      
+      return {
+        ...msg,
+        content: truncatedContent
+      };
+    });
   }
 
   addFileContext(state: AgentState, filepath: string, content: string, reason?: string): AgentState {
