@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
-import { assertInsideWorkspace } from './source';
-import { UnifiedLogger } from '../observability/logger';
+import { assertInsideWorkspace } from './source.js';
+import { UnifiedLogger } from '../observability/logger.js';
 
 export interface CommandResult {
   command: string;

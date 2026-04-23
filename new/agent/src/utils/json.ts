@@ -1,4 +1,4 @@
-import { JsonObject, JsonValue } from '../types';
+import { JsonObject, JsonValue } from '../types/index.js';
 
 export function toJsonValue(value: unknown, depth = 0): JsonValue {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') {

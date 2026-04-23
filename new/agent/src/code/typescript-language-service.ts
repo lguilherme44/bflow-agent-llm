@@ -1,8 +1,8 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
-import { CodeDiagnostic, SourcePosition, SourceRange, SymbolReference, TextPatch } from '../types';
-import { indexToPosition, positionToIndex, rangeFromOffsets } from './source';
+import { CodeDiagnostic, SourcePosition, SourceRange, SymbolReference, TextPatch } from '../types/index.js';
+import { indexToPosition, positionToIndex, rangeFromOffsets } from './source.js';
 
 interface ScriptFile {
   version: number;

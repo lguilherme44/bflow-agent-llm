@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { MockLLMProvider } from '../llm/providers';
-import { LLMRouter } from '../llm/router';
-import { redactSecrets } from '../llm/redaction';
-import { PromptLibrary } from '../prompts/library';
-import { LocalRagService } from '../rag/local-rag';
+import { MockLLMProvider } from '../llm/providers.js';
+import { LLMRouter } from '../llm/router.js';
+import { redactSecrets } from '../llm/redaction.js';
+import { PromptLibrary } from '../prompts/library.js';
+import { LocalRagService } from '../rag/local-rag.js';
 
 test('llm router falls back to secondary provider', async () => {
   const failingProvider = new MockLLMProvider([]);

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { AgentMessage, JsonValue, LLMConfig, LLMFinalResponse, LLMResponse, ToolCall } from '../types';
-import { estimateTokensFromText, toJsonValue } from '../utils/json';
+import { AgentMessage, JsonValue, LLMConfig, LLMFinalResponse, LLMResponse, ToolCall } from '../types/index.js';
+import { estimateTokensFromText, toJsonValue } from '../utils/json.js';
 
 export interface LLMAdapter {
   complete(messages: AgentMessage[], config?: Partial<LLMConfig>): Promise<LLMResponse>;

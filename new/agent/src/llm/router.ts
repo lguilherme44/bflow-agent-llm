@@ -8,9 +8,9 @@ import {
   LLMRouterPolicy,
   LLMTaskKind,
   ToolSchema,
-} from '../types';
-import { LLMAdapter } from './adapter';
-import { redactMessages } from './redaction';
+} from '../types/index.js';
+import { LLMAdapter } from './adapter.js';
+import { redactMessages } from './redaction.js';
 
 export class LLMRouter {
   private readonly providers = new Map<string, LLMProvider>();

@@ -6,10 +6,10 @@ import {
   RetrievalChunkMetadata,
   RetrievalResult,
   SymbolReference,
-} from '../types';
-import { detectLanguage, hashContent } from '../code/source';
-import { TreeSitterParserService } from '../code/tree-sitter-parser';
-import { estimateTokensFromText } from '../utils/json';
+} from '../types/index.js';
+import { detectLanguage, hashContent } from '../code/source.js';
+import { TreeSitterParserService } from '../code/tree-sitter-parser.js';
+import { estimateTokensFromText } from '../utils/json.js';
 
 export interface RetrieveContextInput {
   task: string;

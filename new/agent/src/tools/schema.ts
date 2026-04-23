@@ -5,7 +5,7 @@ import {
   ToolExample,
   ToolFunction,
   ToolSchema,
-} from '../types';
+} from '../types/index.js';
 
 export class ToolBuilder {
   private readonly schema: Partial<ToolSchema> = {

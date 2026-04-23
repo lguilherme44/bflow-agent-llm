@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-import { CodeLanguage, SourcePosition, SourceRange, TextPatch } from '../types';
+import { CodeLanguage, SourcePosition, SourceRange, TextPatch } from '../types/index.js';
 
 export function detectLanguage(filepath: string): CodeLanguage {
   const ext = path.extname(filepath).toLowerCase();

@@ -1,7 +1,7 @@
-import { ReActAgent, ReActConfig } from './react-loop';
-import { AgentState, ResearchBrief } from '../types';
-import { createTool } from '../tools/schema';
-import { ToolRegistry } from '../tools/registry';
+import { ReActAgent, ReActConfig } from './react-loop.js';
+import { AgentState, ResearchBrief } from '../types/index.js';
+import { createTool } from '../tools/schema.js';
+import { ToolRegistry } from '../tools/registry.js';
 
 export class ResearchAgent {
   private reactAgent: ReActAgent;

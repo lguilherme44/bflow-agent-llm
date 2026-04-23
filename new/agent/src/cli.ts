@@ -1,10 +1,10 @@
-import { OrchestratorAgent } from './agent/orchestrator';
-import { ContextManager } from './context/manager';
-import { CheckpointManager, FileCheckpointStorage } from './state/checkpoint';
-import { createDevelopmentToolRegistry } from './tools/development-tools';
-import { providerFromEnv, LMStudioProvider, OllamaProvider } from './llm/providers';
-import { RouterLLMAdapter, LLMRouter } from './llm/router';
-import { UnifiedLogger } from './observability/logger';
+import { OrchestratorAgent } from './agent/orchestrator.js';
+import { ContextManager } from './context/manager.js';
+import { CheckpointManager, FileCheckpointStorage } from './state/checkpoint.js';
+import { createDevelopmentToolRegistry } from './tools/development-tools.js';
+import { providerFromEnv, LMStudioProvider, OllamaProvider } from './llm/providers.js';
+import { RouterLLMAdapter, LLMRouter } from './llm/router.js';
+import { UnifiedLogger } from './observability/logger.js';
 import path from 'path';
 
 async function main() {

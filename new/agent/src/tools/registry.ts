@@ -1,4 +1,4 @@
-import { ToolDefinition, ToolSchema } from '../types';
+import { ToolDefinition, ToolSchema } from '../types/index.js';
 
 export class ToolRegistry {
   private readonly tools = new Map<string, ToolDefinition>();

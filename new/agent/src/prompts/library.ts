@@ -1,4 +1,4 @@
-import { LLMTaskKind } from '../types';
+import { LLMTaskKind } from '../types/index.js';
 
 export interface PromptProfile {
   id: string;

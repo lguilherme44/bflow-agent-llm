@@ -1,7 +1,7 @@
 import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AgentState } from '../types';
-import { AgentStateMachine } from './machine';
+import { AgentState } from '../types/index.js';
+import { AgentStateMachine } from './machine.js';
 
 export interface CheckpointListFilter {
   agentId?: string;

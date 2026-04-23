@@ -1,6 +1,6 @@
-import { AgentMessage, LLMConfig, LLMProvider, LLMProviderRequest, LLMProviderResponse } from '../types';
-import { LLMResponseParser } from './adapter';
-import { redactMessages } from './redaction';
+import { AgentMessage, LLMConfig, LLMProvider, LLMProviderRequest, LLMProviderResponse } from '../types/index.js';
+import { LLMResponseParser } from './adapter.js';
+import { redactMessages } from './redaction.js';
 
 export interface ProviderPricing {
   inputPerMillionUsd: number;

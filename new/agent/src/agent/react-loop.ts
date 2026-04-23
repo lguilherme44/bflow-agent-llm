@@ -7,15 +7,15 @@ import {
   LLMResponse,
   ToolCall,
   ToolResult,
-} from '../types';
-import { ContextManager } from '../context/manager';
-import { LLMAdapter, LLMResponseParser } from '../llm/adapter';
-import { TracingService } from '../observability/tracing';
-import { UnifiedLogger } from '../observability/logger';
-import { CheckpointManager } from '../state/checkpoint';
-import { AgentStateMachine } from '../state/machine';
-import { ExecutorConfig, ToolExecutor, ToolExecutorHooks } from '../tools/executor';
-import { ToolRegistry } from '../tools/registry';
+} from '../types/index.js';
+import { ContextManager } from '../context/manager.js';
+import { LLMAdapter, LLMResponseParser } from '../llm/adapter.js';
+import { TracingService } from '../observability/tracing.js';
+import { UnifiedLogger } from '../observability/logger.js';
+import { CheckpointManager } from '../state/checkpoint.js';
+import { AgentStateMachine } from '../state/machine.js';
+import { ExecutorConfig, ToolExecutor, ToolExecutorHooks } from '../tools/executor.js';
+import { ToolRegistry } from '../tools/registry.js';
 
 export interface ReActConfig {
   llm: LLMAdapter;
@@ -29,6 +29,7 @@ export interface ReActConfig {
   executorHooks?: ToolExecutorHooks;
   humanApprovalCallback?: (toolCall: ToolCall, reason: string) => Promise<boolean>;
   humanApprovalPolicy?: (toolCall: ToolCall, state: AgentState) => string | undefined;
+  onUpdate?: (event: { type: string; role?: string; content?: string; usage?: any }) => void;
 }
 
 export interface VerificationResult {
@@ -251,6 +252,13 @@ export class ReActAgent {
       timestamp: new Date().toISOString(),
     });
 
+    this.config.onUpdate?.({ 
+      type: 'message_added', 
+      role: 'assistant', 
+      content: llmResponse.content,
+      usage: llmResponse.usage 
+    });
+
     await this.config.checkpointManager.checkpoint(next);
     return { state: next, llmResponse };
   }
@@ -405,6 +413,11 @@ export class ReActAgent {
       toolResult: result,
       timestamp: new Date().toISOString(),
     });
+    this.config.onUpdate?.({ 
+      type: 'message_added', 
+      role: 'tool', 
+      content: next.messages.at(-1)?.content || '' 
+    });
     return next;
   }
 
@@ -452,6 +465,7 @@ export class ReActAgent {
       'Use complete_task when the task is done. If tool JSON is invalid, correct it on the next turn.',
       'Prefer AST-first code edits and request human approval for destructive, broad or sensitive actions.',
       this.config.registry.generateToolPrompt(),
+      '\nIMPORTANT: Always respond in the SAME LANGUAGE as the user\'s prompt. If the user asks in Portuguese, you MUST answer in Portuguese.',
     ].join('\n\n');
   }
 

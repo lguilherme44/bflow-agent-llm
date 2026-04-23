@@ -1,6 +1,6 @@
 import { Lang, parse } from '@ast-grep/napi';
-import { CodeLanguage, TextPatch } from '../types';
-import { detectLanguage, rangeFromOffsets } from './source';
+import { CodeLanguage, TextPatch } from '../types/index.js';
+import { detectLanguage, rangeFromOffsets } from './source.js';
 
 export interface StructuralSearchMatch {
   filepath: string;

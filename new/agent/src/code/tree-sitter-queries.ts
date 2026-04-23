@@ -1,4 +1,4 @@
-import { CodeLanguage } from '../types';
+import { CodeLanguage } from '../types/index.js';
 
 export interface VersionedTreeSitterQuery {
   language: CodeLanguage;

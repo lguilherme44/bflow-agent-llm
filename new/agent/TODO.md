@@ -1065,3 +1065,53 @@ Pronto quando: cada falha importante vira melhoria testavel.
 - [ ] Mede custo e tokens.
 - [ ] Possui benchmark inicial.
 - [ ] Nao acessa nem modifica recursos fora das politicas configuradas.
+
+## Fase 9: Interface & Developer Experience (CLI Profissional)
+
+Objetivo: transformar o agente em uma ferramenta de linha de comando de primeira classe, com baixa fricção e alta interatividade.
+
+### 9.1 CLI Interativa (REPL)
+
+- [ ] Implementar shell interativo (`agent chat`) para conversas contínuas.
+- [ ] Suporte a multi-line input (útil para passar blocos de código ou requisitos complexos).
+- [ ] Highlight de sintaxe no terminal para código (Markdown/TS) e JSON.
+- [ ] Spinners e loading states claros para diferenciar "pensando", "agindo" e "observando".
+- [ ] Histórico de comandos (seta para cima) persistente entre sessões.
+
+### 9.2 Instalação Global e Experiência "Zero-Config"
+
+- [ ] Configurar campo `bin` no `package.json` para expor o comando `agent`.
+- [ ] Implementar `agent init` para configurar o diretório `.agent/` e `skills.md` em novos projetos.
+- [ ] Detecção automática do contexto do projeto (Frameworks, Linguagens, Test Runners).
+- [ ] Suporte a configuração global em `~/.config/agent/config.json` e local em `.agentrc`.
+
+### 9.3 Interface Visual (TUI) com React/Ink
+
+- [x] Avaliar e implementar a interface usando **Ink** (React para CLI) para componentes ricos.
+- [x] Criar Dashboard de Status: mostrar agentes ativos, consumo de tokens e tempo de execução em tempo real.
+- [ ] Visualizador de Diff Semântico: mostrar mudanças de código com cores e indentação clara no terminal.
+- [ ] Menu interativo de HITL: `[A]provar, [R]ejeitar, [P]lanejar de novo, [S]kip, [E]ditar Prompt`.
+- [ ] Notificações de sistema (opcional) para quando o agente terminar tarefas longas ou pedir atenção.
+- [x] Logs "dobráveis": visualização limpa do pensamento do agente, permitindo expandir detalhes técnicos se necessário.
+
+### 9.4 Gestão de Sessões e Persistência
+
+- [ ] `agent list`: listar tarefas recentes e seus status.
+- [ ] `agent resume <task-id>`: retomar uma tarefa interrompida ou em estado de erro.
+- [ ] `agent status`: ver o que o agente está fazendo no momento (se rodando em background).
+- [ ] Exportação de logs/traces simplificada para depuração humana.
+
+### 9.5 Integração com Workflow do Dev
+
+- [ ] `agent commit`: agente analisa o diff e gera uma mensagem de commit seguindo Conventional Commits.
+- [ ] `agent pr`: agente revisa a branch e prepara a descrição do Pull Request.
+- [ ] Atalhos para ferramentas comuns: `agent test`, `agent lint`, `agent fix`.
+
+### 9.6 Permissões e Segurança no Workspace
+
+- [ ] Sistema de `Capabilities`: o agente deve pedir permissão ao iniciar (`agent grant`) para ler/escrever no workspace.
+- [ ] Sandbox Mode: rodar comandos de terminal em um ambiente isolado (Docker/gVisor) por padrão.
+- [ ] Denylist de arquivos sensíveis (ex: `.env`, chaves SSH) protegida por padrão no CLI.
+- [ ] Auditoria Local: gerar um arquivo `.agent/audit.log` com hash de cada comando e arquivo alterado.
+
+Pronto quando: usar o agente é tão natural quanto usar o `git` ou o `npm`, com uma interface visual que passa confiança e controle total ao desenvolvedor.

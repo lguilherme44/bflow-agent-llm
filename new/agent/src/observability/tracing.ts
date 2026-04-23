@@ -8,7 +8,7 @@ import {
 } from '@opentelemetry/sdk-trace-base';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { Resource } from '@opentelemetry/resources';
-import { ToolResult, LLMTaskKind } from '../types';
+import { ToolResult, LLMTaskKind } from '../types/index.js';
 
 const TRACER_NAME = 'agent-core';
 

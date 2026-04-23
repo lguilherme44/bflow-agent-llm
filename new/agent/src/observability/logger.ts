@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { redactSecrets } from '../llm/redaction';
-import { ToolResult } from '../types';
+import { redactSecrets } from '../llm/redaction.js';
+import { ToolResult } from '../types/index.js';
 
 export interface LogEntry {
   timestamp: string;

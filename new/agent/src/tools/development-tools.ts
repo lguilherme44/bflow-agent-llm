@@ -1,15 +1,15 @@
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AstGrepService } from '../code/ast-grep-service';
-import { CodeEditingService } from '../code/editing-service';
-import { assertInsideWorkspace } from '../code/source';
-import { TerminalService } from '../code/terminal-service';
-import { TreeSitterParserService } from '../code/tree-sitter-parser';
-import { TypeScriptLanguageService } from '../code/typescript-language-service';
-import { LocalRagService } from '../rag/local-rag';
-import { JsonValue } from '../types';
-import { createTool } from './schema';
-import { ToolRegistry } from './registry';
+import { AstGrepService } from '../code/ast-grep-service.js';
+import { CodeEditingService } from '../code/editing-service.js';
+import { assertInsideWorkspace } from '../code/source.js';
+import { TerminalService } from '../code/terminal-service.js';
+import { TreeSitterParserService } from '../code/tree-sitter-parser.js';
+import { TypeScriptLanguageService } from '../code/typescript-language-service.js';
+import { LocalRagService } from '../rag/local-rag.js';
+import { JsonValue } from '../types/index.js';
+import { createTool } from './schema.js';
+import { ToolRegistry } from './registry.js';
 
 export interface DevelopmentToolOptions {
   workspaceRoot?: string;

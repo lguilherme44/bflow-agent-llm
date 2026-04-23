@@ -1,7 +1,11 @@
 import { readFile } from 'node:fs/promises';
-import Parser = require('tree-sitter');
-import { AstNode, CodeDiagnostic, CodeDocument, CodeLanguage, SourceRange, SymbolReference } from '../types';
-import { detectLanguage, hashContent } from './source';
+import { createRequire } from 'node:module';
+import { AstNode, CodeDiagnostic, CodeDocument, CodeLanguage, SourceRange, SymbolReference } from '../types/index.js';
+import { detectLanguage, hashContent } from './source.js';
+
+// Cria um require compatível com ESM
+const require = createRequire(import.meta.url);
+const Parser = require('tree-sitter');
 
 const TypeScriptGrammar = require('tree-sitter-typescript') as {
   typescript: unknown;
@@ -12,12 +16,12 @@ const JsonGrammar = require('tree-sitter-json') as unknown;
 
 interface CachedTree {
   hash: string;
-  tree: Parser.Tree;
+  tree: any; // Parser.Tree
   document: CodeDocument;
 }
 
 export class TreeSitterParserService {
-  private readonly parsers = new Map<CodeLanguage, Parser>();
+  private readonly parsers = new Map<CodeLanguage, any>();
   private readonly cache = new Map<string, CachedTree>();
 
   constructor(private readonly maxAstDepth = 6) {}
@@ -99,7 +103,7 @@ export class TreeSitterParserService {
     }
   }
 
-  private getParser(language: CodeLanguage): Parser {
+  private getParser(language: CodeLanguage): any {
     const cached = this.parsers.get(language);
     if (cached) {
       return cached;
@@ -127,7 +131,7 @@ export class TreeSitterParserService {
     }
   }
 
-  private collectDiagnostics(filepath: string, rootNode: Parser.SyntaxNode): CodeDiagnostic[] {
+  private collectDiagnostics(filepath: string, rootNode: any): CodeDiagnostic[] {
     if (!rootNode.hasError) {
       return [];
     }
@@ -147,7 +151,7 @@ export class TreeSitterParserService {
     return diagnostics;
   }
 
-  private collectSymbols(filepath: string, rootNode: Parser.SyntaxNode): SymbolReference[] {
+  private collectSymbols(filepath: string, rootNode: any): SymbolReference[] {
     const symbols: SymbolReference[] = [];
 
     this.walk(rootNode, (node) => {
@@ -160,7 +164,7 @@ export class TreeSitterParserService {
     return symbols;
   }
 
-  private symbolForNode(filepath: string, node: Parser.SyntaxNode): SymbolReference | null {
+  private symbolForNode(filepath: string, node: any): SymbolReference | null {
     switch (node.type) {
       case 'function_declaration':
         return this.makeSymbol(filepath, node, 'function', this.nameFromField(node, 'name'));
@@ -193,7 +197,7 @@ export class TreeSitterParserService {
     }
   }
 
-  private callSymbol(filepath: string, node: Parser.SyntaxNode): SymbolReference | null {
+  private callSymbol(filepath: string, node: any): SymbolReference | null {
     const rawName = this.nameFromField(node, 'function');
     if (!rawName) {
       return null;
@@ -206,7 +210,7 @@ export class TreeSitterParserService {
 
   private makeSymbol(
     filepath: string,
-    node: Parser.SyntaxNode,
+    node: any,
     kind: SymbolReference['kind'],
     name?: string,
     exported?: boolean,
@@ -223,10 +227,10 @@ export class TreeSitterParserService {
     };
   }
 
-  private toAstNode(node: Parser.SyntaxNode, depth: number): AstNode {
+  private toAstNode(node: any, depth: number): AstNode {
     const children =
       depth < this.maxAstDepth
-        ? node.namedChildren.slice(0, 80).map((child) => this.toAstNode(child, depth + 1))
+        ? node.namedChildren.slice(0, 80).map((child: any) => this.toAstNode(child, depth + 1))
         : undefined;
 
     return {
@@ -239,14 +243,14 @@ export class TreeSitterParserService {
     };
   }
 
-  private walk(node: Parser.SyntaxNode, visitor: (node: Parser.SyntaxNode) => void): void {
+  private walk(node: any, visitor: (node: any) => void): void {
     visitor(node);
     for (const child of node.namedChildren) {
       this.walk(child, visitor);
     }
   }
 
-  private nodeRange(node: Parser.SyntaxNode): SourceRange {
+  private nodeRange(node: any): SourceRange {
     return {
       start: {
         line: node.startPosition.row + 1,
@@ -261,7 +265,7 @@ export class TreeSitterParserService {
     };
   }
 
-  private bestNodeName(node: Parser.SyntaxNode): string | undefined {
+  private bestNodeName(node: any): string | undefined {
     return (
       this.nameFromField(node, 'name') ??
       this.nameFromField(node, 'key') ??
@@ -271,21 +275,21 @@ export class TreeSitterParserService {
     );
   }
 
-  private nameFromField(node: Parser.SyntaxNode, field: string): string | undefined {
+  private nameFromField(node: any, field: string): string | undefined {
     return node.childForFieldName(field)?.text;
   }
 
-  private importSource(node: Parser.SyntaxNode): string | undefined {
+  private importSource(node: any): string | undefined {
     return node.childForFieldName('source')?.text.replace(/^['"]|['"]$/g, '');
   }
 
-  private exportName(node: Parser.SyntaxNode): string | undefined {
+  private exportName(node: any): string | undefined {
     const declaration = node.childForFieldName('declaration');
     return declaration ? this.bestNodeName(declaration) : node.text.slice(0, 80);
   }
 
-  private jsxName(node: Parser.SyntaxNode): string | undefined {
-    const opening = node.namedChildren.find((child) => child.type === 'jsx_opening_element' || child.type === 'jsx_self_closing_element');
+  private jsxName(node: any): string | undefined {
+    const opening = node.namedChildren.find((child: any) => child.type === 'jsx_opening_element' || child.type === 'jsx_self_closing_element');
     return opening?.childForFieldName('name')?.text ?? opening?.namedChildren[0]?.text;
   }
 }

@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { CodeDocument, EditPlan, SourcePosition, SymbolReference } from '../types';
-import { applyTextPatches, assertInsideWorkspace, createUnifiedDiff } from './source';
-import { AstGrepService } from './ast-grep-service';
-import { TreeSitterParserService } from './tree-sitter-parser';
-import { TypeScriptLanguageService } from './typescript-language-service';
+import { CodeDocument, EditPlan, SourcePosition, SymbolReference } from '../types/index.js';
+import { applyTextPatches, assertInsideWorkspace, createUnifiedDiff } from './source.js';
+import { AstGrepService } from './ast-grep-service.js';
+import { TreeSitterParserService } from './tree-sitter-parser.js';
+import { TypeScriptLanguageService } from './typescript-language-service.js';
 
 export class CodeEditingService {
   private readonly plans = new Map<string, EditPlan>();

@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { OrchestratorAgent } from '../agent/orchestrator';
-import { MockLLMAdapter } from '../llm/adapter';
-import { ContextManager } from '../context/manager';
-import { createDevelopmentToolRegistry } from '../tools/development-tools';
-import { CheckpointManager, FileCheckpointStorage } from '../state/checkpoint';
+import { OrchestratorAgent } from '../agent/orchestrator.js';
+import { MockLLMAdapter } from '../llm/adapter.js';
+import { ContextManager } from '../context/manager.js';
+import { createDevelopmentToolRegistry } from '../tools/development-tools.js';
+import { CheckpointManager, FileCheckpointStorage } from '../state/checkpoint.js';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';

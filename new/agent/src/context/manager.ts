@@ -7,8 +7,8 @@ import {
   JsonValue,
   RelevantFileContext,
   StructuredSummary,
-} from '../types';
-import { estimateTokensFromText } from '../utils/json';
+} from '../types/index.js';
+import { estimateTokensFromText } from '../utils/json.js';
 
 export interface ContextConfig {
   maxMessages: number;

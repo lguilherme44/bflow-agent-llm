@@ -8,7 +8,7 @@ import {
   HumanApprovalRequest,
   ToolCall,
   ToolResult,
-} from '../types';
+} from '../types/index.js';
 
 type TransitionResolver = (state: AgentState, event: AgentEvent) => AgentStatus;
 

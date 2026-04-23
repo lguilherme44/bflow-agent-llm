@@ -9,9 +9,9 @@ import {
   ToolErrorCode,
   ToolExecutionContext,
   ToolResult,
-} from '../types';
-import { toJsonValue } from '../utils/json';
-import { ToolRegistry } from './registry';
+} from '../types/index.js';
+import { toJsonValue } from '../utils/json.js';
+import { ToolRegistry } from './registry.js';
 
 export interface ExecutorConfig {
   defaultTimeoutMs: number;

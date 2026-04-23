@@ -3,17 +3,17 @@ import assert from 'node:assert/strict';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ToolCall, ToolResult } from '../types';
-import { createTestTracing } from '../observability/tracing';
-import { ReActAgent } from '../agent/react-loop';
-import { ContextManager } from '../context/manager';
-import { MockLLMAdapter } from '../llm/adapter';
-import { CheckpointManager, FileCheckpointStorage } from '../state/checkpoint';
-import { AgentStateMachine } from '../state/machine';
-import { ToolExecutor } from '../tools/executor';
-import { ToolRegistry } from '../tools/registry';
-import { createTool } from '../tools/schema';
-import { createDevelopmentToolRegistry } from '../tools/development-tools';
+import { ToolCall, ToolResult } from '../types/index.js';
+import { createTestTracing } from '../observability/tracing.js';
+import { ReActAgent } from '../agent/react-loop.js';
+import { ContextManager } from '../context/manager.js';
+import { MockLLMAdapter } from '../llm/adapter.js';
+import { CheckpointManager, FileCheckpointStorage } from '../state/checkpoint.js';
+import { AgentStateMachine } from '../state/machine.js';
+import { ToolExecutor } from '../tools/executor.js';
+import { ToolRegistry } from '../tools/registry.js';
+import { createTool } from '../tools/schema.js';
+import { createDevelopmentToolRegistry } from '../tools/development-tools.js';
 
 test('tracing creates spans for tool calls during agent run', async () => {
   const tracing = createTestTracing();

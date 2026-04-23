@@ -1,4 +1,4 @@
-import { AgentMessage } from '../types';
+import { AgentMessage } from '../types/index.js';
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/\b(api[_-]?key|token|secret|password|passwd|pwd)\s*[:=]\s*["']?[^"'\s]+/gi, '$1=[REDACTED]'],

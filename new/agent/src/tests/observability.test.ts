@@ -2,8 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { UnifiedLogger } from '../observability/logger';
-import { ToolResult } from '../types';
+import { UnifiedLogger } from '../observability/logger.js';
+import { ToolResult } from '../types/index.js';
 
 test('UnifiedLogger writes JSONL and redacts secrets', async () => {
   const logDir = path.join(process.cwd(), '.agent', 'logs-test-' + Date.now());

@@ -1,2 +1,2 @@
-export { TracingService, TracingConfig, createTestTracing } from './tracing';
-export { UnifiedLogger, LoggerConfig, LogEntry } from './logger';
+export { TracingService, TracingConfig, createTestTracing } from './tracing.js';
+export { UnifiedLogger, LoggerConfig, LogEntry } from './logger.js';
