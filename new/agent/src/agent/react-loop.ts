@@ -308,13 +308,25 @@ export class ReActAgent {
       return { terminal: false, state };
     }
 
-    if (lastExecution.call.toolName === 'complete_task' && lastExecution.result.success) {
-      const data = lastExecution.result.data;
-      const summary = extractSummary(data) ?? 'Task completed through complete_task.';
-      return {
-        terminal: true,
-        state: AgentStateMachine.complete(state, summary),
-      };
+    if ((lastExecution.call.toolName === 'complete_task' || typeof (lastExecution.result.data as any)?.completed === 'boolean') && lastExecution.result.success) {
+      const data = lastExecution.result.data as any;
+      
+      // Explicit completion flag from a custom tool
+      if (data?.completed === true) {
+        return {
+          terminal: true,
+          state: AgentStateMachine.complete(state, 'Task completed through specialized completion tool.'),
+        };
+      }
+
+      // Legacy complete_task logic
+      if (lastExecution.call.toolName === 'complete_task') {
+        const summary = extractSummary(data) ?? 'Task completed through complete_task.';
+        return {
+          terminal: true,
+          state: AgentStateMachine.complete(state, summary),
+        };
+      }
     }
 
     if (!lastExecution.result.success && !lastExecution.result.recoverable) {

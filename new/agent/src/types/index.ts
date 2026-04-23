@@ -455,3 +455,29 @@ export interface RetrievalResult {
   score: number;
   reasons: string[];
 }
+
+export type AgentRole = 'researcher' | 'planner' | 'orchestrator' | 'coder' | 'reviewer';
+
+export interface ResearchBrief {
+  taskType: 'bugfix' | 'feature' | 'refactor' | 'test' | 'investigation' | 'documentation';
+  entryPoints: string[];
+  dependencies: string[];
+  risks: string[];
+  summary: string;
+}
+
+export interface ExecutionStream {
+  id: string;
+  name: string;
+  owner: AgentRole;
+  tasks: string[];
+  validations: string[];
+  status: 'pending' | 'in_progress' | 'completed' | 'failed';
+  blockedBy?: string[];
+}
+
+export interface ExecutionPlan {
+  summary: string;
+  streams: ExecutionStream[];
+  estimatedRisk: 'low' | 'medium' | 'high';
+}

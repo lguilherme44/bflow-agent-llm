@@ -3,7 +3,7 @@ import { LLMTaskKind } from '../types';
 export interface PromptProfile {
   id: string;
   version: number;
-  role: LLMTaskKind | 'research' | 'coder' | 'test' | 'reviewer';
+  role: LLMTaskKind | 'research' | 'planning' | 'orchestrator' | 'coder' | 'test' | 'reviewer';
   content: string;
 }
 
@@ -58,6 +58,12 @@ export const ROLE_PROMPTS: PromptProfile[] = [
     version: 1,
     role: 'debugging',
     content: 'Investigate failures by evidence, form minimal hypotheses, patch narrowly and rerun the failing validation first.',
+  },
+  {
+    id: 'orchestrator-agent',
+    version: 1,
+    role: 'orchestrator',
+    content: 'Delegate tasks to specialized agents, monitor streams for success or failure, and merge results safely.',
   },
 ];
 

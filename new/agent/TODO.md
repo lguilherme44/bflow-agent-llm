@@ -25,7 +25,8 @@ Status atualizado em 2026-04-22:
 - [x] Fase 5.0 Slice Básico implementado: OpenTelemetry com TracingService, spans por tool call, LLM call e agent run, exportador in-memory para testes.
 - [x] NOVO: Criar skills.md (Fase 7.2 antecipada) como guia de convenções.
 - [x] Fase 5.1 implementada: UnifiedLogger, log JSONL estruturado com redação de secrets, integração de logs no ReActLoop e TerminalService, testes de formatação inclusos.
-- [ ] Próxima etapa sugerida: Fase 4 - Research Agent + Planning Agent.
+- [x] Fase 4 implementada: Agentes de Research, Planning e Orchestrator criados. Multi-agent delegation funcional.
+- [ ] Próxima etapa sugerida: Fase 6 - Server-Side Hooks (Express/Hono).
 ## 0. Base Tecnica e Build
 
 - [x] Corrigir `tsconfig.json`/tipos Node para reconhecer `console`, `crypto`, `AbortController`, `AbortSignal`, `setTimeout` e `clearTimeout`.
@@ -533,38 +534,38 @@ Pronto quando: prompts sao versionados, testaveis e reaproveitaveis por agente.
 
 ### 4.1 Implementar Research Agent
 
-- [ ] Analisa pedido do usuario.
-- [ ] Identifica tipo de tarefa:
-  - [ ] bugfix
-  - [ ] feature
-  - [ ] refactor
-  - [ ] teste
-  - [ ] investigacao
-  - [ ] documentacao
-- [ ] Busca na codebase com RAG + grep + AST.
-- [ ] Identifica entry points.
-- [ ] Identifica dependencias e arquivos relacionados.
-- [ ] Identifica riscos:
-  - [ ] migracao ampla
-  - [ ] config sensivel
-  - [ ] schema/database
-  - [ ] auth/security
-  - [ ] billing/pagamentos
-- [ ] Produz `ResearchBrief` com evidencias e referencias.
+- [x] Analisa pedido do usuario.
+- [x] Identifica tipo de tarefa:
+  - [x] bugfix
+  - [x] feature
+  - [x] refactor
+  - [x] teste
+  - [x] investigacao
+  - [x] documentacao
+- [x] Busca na codebase com RAG + grep + AST.
+- [x] Identifica entry points.
+- [x] Identifica dependencias e arquivos relacionados.
+- [x] Identifica riscos:
+  - [x] migracao ampla
+  - [x] config sensivel
+  - [x] schema/database
+  - [x] auth/security
+  - [x] billing/pagamentos
+- [x] Produz `ResearchBrief` com evidencias e referencias.
 
 Pronto quando: antes de planejar, o agente sabe onde tocar e quais riscos observar.
 
 ### 4.2 Implementar Planning Agent
 
-- [ ] Gera plano estruturado em Markdown com checkboxes.
-- [ ] Divide em streams paralelos quando possivel.
-- [ ] Define dono de cada stream.
-- [ ] Define arquivos provaveis de escrita por stream.
-- [ ] Define validacoes por stream.
-- [ ] Marca tarefas bloqueantes e independentes.
-- [ ] Estima risco e custo.
-- [ ] Atualiza o plano conforme novas descobertas.
-- [ ] Exemplo de output esperado:
+- [x] Gera plano estruturado em Markdown com checkboxes.
+- [x] Divide em streams paralelos quando possivel.
+- [x] Define dono de cada stream.
+- [x] Define arquivos provaveis de escrita por stream.
+- [x] Define validacoes por stream.
+- [x] Marca tarefas bloqueantes e independentes.
+- [x] Estima risco e custo.
+- [x] Atualiza o plano conforme novas descobertas.
+- [x] Exemplo de output esperado:
 
 ```markdown
 ## Stream A - API Contract
@@ -585,26 +586,26 @@ Pronto quando: qualquer task media vira um plano verificavel, paralelo quando se
 
 ### 4.3 Implementar Orchestrator Agent
 
-- [ ] Orchestrator nao escreve codigo diretamente em tarefas complexas.
-- [ ] Delega para sub-agentes especializados.
-- [ ] Mantem tasklist atualizada.
-- [ ] Garante isolamento de arquivos por stream.
-- [ ] Consolida resultados dos sub-agentes.
-- [ ] Executa verificacao end-to-end:
-  - [ ] testes
-  - [ ] typecheck
-  - [ ] lint
-  - [ ] screenshots se UI
-  - [ ] security scan quando aplicavel
-- [ ] Cria commits granulares:
-  - [ ] um commit por task/coorte logica
-  - [ ] mensagem descritiva
-  - [ ] inclui validacoes executadas
-- [ ] Escala para humano quando:
-  - [ ] conflito de merge ambiguo
-  - [ ] risco alto
-  - [ ] falha repetida
-  - [ ] custo ultrapassa limite
+- [x] Orchestrator nao escreve codigo diretamente em tarefas complexas.
+- [x] Delega para sub-agentes especializados.
+- [x] Mantem tasklist atualizada.
+- [x] Garante isolamento de arquivos por stream.
+- [x] Consolida resultados dos sub-agentes.
+- [x] Executa verificacao end-to-end:
+  - [x] testes
+  - [x] typecheck
+  - [x] lint
+  - [x] screenshots se UI
+  - [x] security scan quando aplicavel
+- [x] Cria commits granulares:
+  - [x] um commit por task/coorte logica
+  - [x] mensagem descritiva
+  - [x] inclui validacoes executadas
+- [x] Escala para humano quando:
+  - [x] conflito de merge ambiguo
+  - [x] risco alto
+  - [x] falha repetida
+  - [x] custo ultrapassa limite
 
 Pronto quando: o agente coordena trabalho complexo sem virar um bloco monolitico opaco.
 
