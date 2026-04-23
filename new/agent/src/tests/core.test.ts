@@ -129,3 +129,105 @@ test('react loop executes a mock task end to end', async () => {
     await rm(workspace, { recursive: true, force: true });
   }
 });
+
+test('tool executor applies timeout', async () => {
+  const registry = new ToolRegistry();
+  registry.register(
+    createTool()
+      .name('slow_tool')
+      .description('A tool that simulates a slow operation for testing timeouts.')
+      .parameters({ type: 'object', properties: {} })
+      .handler(async () => { await new Promise(r => setTimeout(r, 100)); return {}; })
+      .timeoutMs(10)
+      .build()
+  );
+
+  const executor = new ToolExecutor(registry, { maxRetries: 0 });
+  const result = await executor.execute(AgentStateMachine.create('timeout test'), {
+    id: 'call-timeout',
+    toolName: 'slow_tool',
+    arguments: {},
+    timestamp: new Date().toISOString(),
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.errorCode, 'TIMEOUT');
+  assert.equal(result.timedOut, true);
+});
+
+test('tool executor retries on transient error', async () => {
+  const registry = new ToolRegistry();
+  let calls = 0;
+  registry.register(
+    createTool()
+      .name('flaky_tool')
+      .description('A flaky tool that fails on the first attempt for testing retries.')
+      .parameters({ type: 'object', properties: {} })
+      .handler(async () => {
+        calls++;
+        if (calls < 2) throw new Error('Temporary connection error (ECONNRESET)');
+        return { success: true };
+      })
+      .build()
+  );
+
+  const executor = new ToolExecutor(registry, { maxRetries: 1, retryBaseDelayMs: 1 });
+  const result = await executor.execute(AgentStateMachine.create('retry test'), {
+    id: 'call-retry',
+    toolName: 'flaky_tool',
+    arguments: {},
+    timestamp: new Date().toISOString(),
+  });
+
+  assert.equal(result.success, true);
+  assert.equal(result.attempts, 2);
+  assert.equal(calls, 2);
+});
+
+test('tool executor triggers rollback critically', async () => {
+  const registry = new ToolRegistry();
+  let rolledBack = false;
+  registry.register(
+    createTool()
+      .name('critical_tool')
+      .description('A critical tool')
+      .parameters({ type: 'object', properties: {} })
+      .critical()
+      .handler(async () => { throw new Error('Failed midway'); })
+      .onRollback(async () => { rolledBack = true; })
+      .build()
+  );
+
+  const executor = new ToolExecutor(registry, { maxRetries: 0, enableRollback: true });
+  const result = await executor.execute(AgentStateMachine.create('rollback test'), {
+    id: 'call-rollback',
+    toolName: 'critical_tool',
+    arguments: {},
+    timestamp: new Date().toISOString(),
+  });
+
+  assert.equal(result.success, false);
+  assert.equal(result.errorCode, 'CRITICAL_ERROR');
+  assert.equal(rolledBack, true);
+  assert.equal(result.rollback?.attempted, true);
+});
+
+test('context manager prioritizes touched files and compacts old messages', () => {
+  const manager = new ContextManager({ summarizeThreshold: 2, maxMessages: 5 });
+  let state = AgentStateMachine.create('context test');
+  
+  state = manager.addFileContext(state, 'important.ts', 'const x = 1;', 'added');
+  state = manager.addFileContext(state, 'less_important.ts', 'const y = 2;', 'added');
+  state = manager.markFileTouched(state, 'important.ts', 'touched during work');
+  
+  assert.ok(state.context.relevantFiles['important.ts'].score > state.context.relevantFiles['less_important.ts'].score);
+  
+  for (let i = 0; i < 6; i++) {
+    state.messages.push({ role: 'assistant', content: `step ${i}`, timestamp: new Date().toISOString() });
+  }
+  
+  const compacted = manager.prepareMessages(state);
+  assert.ok(compacted.length <= 6); // System + summary + some non-system based on summary threshold
+  assert.ok(compacted.some(m => m.content.includes('important.ts')));
+});
+

@@ -197,6 +197,7 @@ export interface AgentMetadata {
   totalTokensUsed: number;
   checkpointVersion: number;
   schemaVersion: number;
+  traceId?: string;
   lastResumeReason?: string;
   completedAt?: string;
   errorMessage?: string;

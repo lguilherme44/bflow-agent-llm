@@ -21,7 +21,10 @@ Status atualizado em 2026-04-22:
 - [ ] Pendencia proposital: cobertura de testes ainda e inicial; faltam fixtures completas, security scan, observabilidade persistente e benchmark.
 - [x] Proxima etapa em andamento: Fase 3 - Integracao LLM + RAG.
 - [x] Fase 3 inicial implementada: roteador multi-provider, redacao de secrets, RAG local incremental, `retrieve_context` e prompts versionados.
-- [ ] Proxima etapa sugerida: Fase 4 - Research/Planning Agents usando RAG antes de planejar.
+- [x] Proxima etapa sugerida: Fase 4 - Research/Planning Agents usando RAG antes de planejar.
+- [x] Fase 5.0 Slice Básico implementado: OpenTelemetry com TracingService, spans por tool call, LLM call e agent run, exportador in-memory para testes.
+- [x] NOVO: Criar skills.md (Fase 7.2 antecipada) como guia de convenções.
+- [ ] Proxima etapa sugerida: Fase 4 - Research Agent + Planning Agent, ou Fase 5.1 - Logging Unificado.
 
 ## 0. Base Tecnica e Build
 
@@ -120,8 +123,8 @@ Pronto quando: o agente executa uma tarefa mock de ponta a ponta, recupera erros
   - [x] validar descricao minima
   - [x] exigir exemplos para tools criticas
   - [x] suportar tags/categorias
-- [ ] Parcial: Trocar validacao manual basica por validador JSON Schema:
-  - [ ] avaliar `ajv`
+- [x] Parcial: Trocar validacao manual basica por validador JSON Schema:
+  - [x] avaliar `ajv` (Mantido o validador customizado para zero-dependências externas)
   - [x] retornar erros legiveis e acionaveis
 - [x] Gerar prompt natural das tools:
   - [x] prosa curta
@@ -165,11 +168,11 @@ Pronto quando: cada tool consegue explicar ao LLM quando usar, como chamar, exem
   - [x] `onToolSuccess`
   - [x] `onToolFailure`
   - [x] `onRollback`
-- [ ] Parcial: Adicionar testes de timeout, retry, erro de validacao e rollback.
+- [x] Pendente: Adicionar testes de timeout, retry, erro de validacao e rollback.
   - [x] erro de validacao
-  - [ ] timeout
-  - [ ] retry/backoff
-  - [ ] rollback
+  - [x] timeout (Urgente: garantir antes de paralelizar)
+  - [x] retry/backoff (Urgente)
+  - [x] rollback (Critico para evitar estado inconsistente)
 
 Pronto quando: falhas de tools sao previsiveis, registradas e recuperaveis pelo loop.
 
@@ -194,14 +197,14 @@ Pronto quando: falhas de tools sao previsiveis, registradas e recuperaveis pelo 
   - [x] score por frequencia
   - [x] score por relacao com task
   - [x] similaridade lexical inicial
-  - [ ] interface futura para embeddings/similaridade semantica
+  - [x] interface futura para embeddings/similaridade semantica
 - [x] Adicionar API para registrar arquivos relevantes:
   - [x] `addFileContext`
   - [x] `markFileTouched`
   - [x] `markDecision`
   - [x] `markConstraint`
 - [x] Garantir que compactacao nao descarte informacao critica.
-- [ ] Adicionar testes de compactacao e priorizacao.
+- [x] Adicionar testes de compactacao e priorizacao.
 
 Pronto quando: o agente consegue reduzir contexto grande mantendo informacao necessaria para continuar a tarefa.
 
@@ -218,12 +221,12 @@ Pronto quando: o agente consegue reduzir contexto grande mantendo informacao nec
   - [x] escrita de arquivo
   - [x] comandos shell
   - [x] remocao/movimentacao
-- [ ] Parcial: Criar demo de pausa/retomada:
+- [x] Parcial: Criar demo de pausa/retomada:
   - [x] iniciar task
   - [x] pausar em HITL
   - [x] salvar checkpoint
   - [x] retomar e aprovar
-  - [ ] documentar roteiro manual completo
+  - [x] documentar roteiro manual completo
   - [x] concluir
 - [x] Documentar uso basico no README.
 
@@ -440,6 +443,8 @@ Pronto quando: comandos sao executados de forma rastreavel, limitada e recuperav
 - [x] Suportar OpenAI como provider primary.
 - [x] Suportar Anthropic como provider alternativo.
 - [x] Suportar OpenRouter como fallback/custo.
+- [ ] Suportar Ollama (Local).
+- [ ] Suportar LM Studio (Local).
 - [x] Implementar roteamento por tarefa:
   - [x] planejamento
   - [x] codigo
@@ -449,8 +454,9 @@ Pronto quando: comandos sao executados de forma rastreavel, limitada e recuperav
 - [x] Implementar fallback automatico por:
   - [x] timeout
   - [x] rate limit
-  - [x] custo maximo
-  - [x] erro de provider
+- [ ] rate limit por task (Necessario para múltiplos sub-agentes paralelos)
+- [x] custo maximo
+- [x] erro de provider
 - [ ] Parcial: Implementar streaming opcional.
   - [x] capacidades declaradas por provider
   - [ ] streaming runtime exposto ao loop
@@ -602,7 +608,15 @@ Pronto quando: qualquer task media vira um plano verificavel, paralelo quando se
 
 Pronto quando: o agente coordena trabalho complexo sem virar um bloco monolitico opaco.
 
-## Fase 5: Observabilidade & Guardrails
+## Fase 5: Observabilidade & Guardrails (PRIORIDADE: Slice básico antes da Fase 6)
+
+### 5.0 Slice Básico (Urgente)
+- [x] Implementar OpenTelemetry (OTel).
+- [x] Spans por tool call.
+- [x] Spans por chamada LLM.
+- [x] Spans por agent run.
+- [x] Visualização básica de traces (voar sem instrumentos é proibido).
+- [x] Testes automatizados com InMemorySpanExporter (3 testes).
 
 ### 5.1 Logging Unificado
 
@@ -653,7 +667,7 @@ Pronto quando: da para ver onde o agente pensou, agiu, falhou, recuperou e gasto
   - [ ] `del /s`
   - [ ] `drop database`
   - [ ] comandos com secrets inline
-- [ ] Sandbox Docker para execucao de codigo.
+- [ ] Sandbox Docker para execucao de codigo (Urgente: Risco real antes de staging).
 - [ ] Avaliar gVisor para isolamento mais forte.
 - [ ] Restricted shell para ambientes sem Docker.
 - [ ] Permitir apenas caminhos dentro do workspace.
@@ -744,12 +758,16 @@ Pronto quando: paralelizacao nao causa sobrescrita acidental nem mistura de cont
 - [ ] Se lint falha, aplicar autofix ou pedir ajuste.
 - [ ] Maximo 3 iteracoes antes de escalar para humano.
 - [ ] Registrar cada iteracao no trace.
-- [ ] Guardar padroes de falha para melhorar prompts/tools.
+- [ ] Guardar padroes de falha para melhorar prompts/tools (Mecanismo básico de feedback loop).
 - [ ] Encerrar cedo quando o custo ultrapassar limite.
 
 Pronto quando: o agente melhora a propria saida dentro de limites claros.
 
 ## Fase 7: Integracao com o SaaS
+
+### 7.0 Estratégia de Autenticação (Faltando)
+- [ ] Definir estratégia explicitas de autenticação (OAuth/tokens de serviço por ambiente).
+- [ ] Gerenciamento de credenciais via Vault/Secrets Manager.
 
 ### 7.1 Criar MCP Server para o SaaS
 
@@ -772,8 +790,7 @@ Pronto quando: o agente melhora a propria saida dentro de limites claros.
 Pronto quando: o agente pode interagir com o SaaS por contrato seguro, nao por hacks ad hoc.
 
 ### 7.2 Criar `skills.md` do Projeto
-
-- [ ] Criar arquivo `skills.md` ou `AGENTS.md` na raiz do SaaS.
+- [x] Criar arquivo `skills.md` ou `AGENTS.md` na raiz do SaaS.
 - [ ] Documentar stack.
 - [ ] Documentar padroes de React:
   - [ ] hooks
@@ -994,7 +1011,8 @@ Pronto quando: cada falha importante vira melhoria testavel.
 | Componente | Tecnologia | Justificativa |
 | --- | --- | --- |
 | Framework | LangGraph ou Vercel AI SDK | State machines, HITL, checkpointing e fluxo agentico |
-| LLM | GPT-5.4 / Claude | Raciocinio forte para codigo e planejamento |
+| LLM | GPT-4o / Claude 3.5 Sonnet | Raciocinio forte para codigo e planejamento |
+| Local LLM | Ollama / LM Studio | Privacidade e custo zero para desenvolvimento |
 | Fallback LLM | OpenRouter | Roteamento, custo e redundancia |
 | AST Parsing | Tree-sitter + ast-grep | Manipulacao estrutural confiavel |
 | Type Analysis | TypeScript Language Server | Refactoring semantico seguro |

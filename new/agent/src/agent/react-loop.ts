@@ -1,3 +1,4 @@
+import { Span } from '@opentelemetry/api';
 import {
   AgentState,
   AgentStatus,
@@ -9,6 +10,7 @@ import {
 } from '../types';
 import { ContextManager } from '../context/manager';
 import { LLMAdapter, LLMResponseParser } from '../llm/adapter';
+import { TracingService } from '../observability/tracing';
 import { CheckpointManager } from '../state/checkpoint';
 import { AgentStateMachine } from '../state/machine';
 import { ExecutorConfig, ToolExecutor, ToolExecutorHooks } from '../tools/executor';
@@ -19,6 +21,7 @@ export interface ReActConfig {
   registry: ToolRegistry;
   checkpointManager: CheckpointManager;
   contextManager: ContextManager;
+  tracing?: TracingService;
   llmConfig?: Partial<LLMConfig>;
   executorConfig?: Partial<ExecutorConfig>;
   executorHooks?: ToolExecutorHooks;
@@ -35,11 +38,68 @@ export class ReActAgent {
   private readonly executor: ToolExecutor;
 
   constructor(private readonly config: ReActConfig) {
-    this.executor = new ToolExecutor(config.registry, config.executorConfig, config.executorHooks);
+    this.executor = new ToolExecutor(
+      config.registry,
+      config.executorConfig,
+      this.buildTracedHooks(config.executorHooks)
+    );
+  }
+
+  /** Wrap user-provided hooks with tracing spans for tool calls. */
+  private buildTracedHooks(userHooks?: ToolExecutorHooks): ToolExecutorHooks {
+    const tracing = this.config.tracing;
+    if (!tracing) return userHooks ?? {};
+
+    const spanMap = new Map<string, Span>();
+
+    return {
+      ...userHooks,
+      onToolStart: async (toolCall, attempt) => {
+        if (attempt === 1) {
+          const span = tracing.startToolSpan(toolCall.toolName, toolCall.id);
+          spanMap.set(toolCall.id, span);
+        }
+        await userHooks?.onToolStart?.(toolCall, attempt);
+      },
+      onToolRetry: async (toolCall, attempt, error, delayMs) => {
+        const span = spanMap.get(toolCall.id);
+        span?.addEvent('retry', {
+          'retry.attempt': attempt,
+          'retry.error': error.message,
+          'retry.delay_ms': delayMs,
+        });
+        await userHooks?.onToolRetry?.(toolCall, attempt, error, delayMs);
+      },
+      onToolSuccess: async (toolCall, result) => {
+        const span = spanMap.get(toolCall.id);
+        if (span) {
+          tracing.recordToolResult(span, result);
+          spanMap.delete(toolCall.id);
+        }
+        await userHooks?.onToolSuccess?.(toolCall, result);
+      },
+      onToolFailure: async (toolCall, result) => {
+        const span = spanMap.get(toolCall.id);
+        if (span) {
+          tracing.recordToolResult(span, result);
+          spanMap.delete(toolCall.id);
+        }
+        await userHooks?.onToolFailure?.(toolCall, result);
+      },
+      onRollback: async (toolCall, rollbackResult) => {
+        const span = spanMap.get(toolCall.id);
+        span?.addEvent('rollback', {
+          'rollback.attempted': rollbackResult.attempted,
+          'rollback.success': rollbackResult.success,
+        });
+        await userHooks?.onRollback?.(toolCall, rollbackResult);
+      },
+    };
   }
 
   async run(task: string, existingState?: AgentState): Promise<AgentState> {
     let state = existingState ?? AgentStateMachine.create(task);
+    const agentSpan = this.config.tracing?.startAgentSpan(task, state.id);
     await this.config.checkpointManager.checkpoint(state);
 
     try {
@@ -48,6 +108,7 @@ export class ReActAgent {
           state = await this.handlePendingHumanApproval(state);
           await this.config.checkpointManager.checkpoint(state);
           if (state.status === 'awaiting_human') {
+            agentSpan?.addEvent('awaiting_human');
             return state;
           }
         }
@@ -105,6 +166,14 @@ export class ReActAgent {
       state = AgentStateMachine.fail(state, message);
     }
 
+    agentSpan?.setAttributes({
+      'agent.status': state.status,
+      'agent.iterations': state.metadata.iterationCount,
+      'agent.total_tokens': state.metadata.totalTokensUsed,
+      'agent.tool_calls': state.toolHistory.length,
+    });
+    agentSpan?.end();
+
     await this.config.checkpointManager.checkpoint(state);
     return state;
   }
@@ -137,8 +206,26 @@ export class ReActAgent {
         ? AgentStateMachine.dispatch(state, { type: 'thought_started' })
         : state;
     const messages = this.config.contextManager.prepareMessages(thinkingState, this.buildSystemPrompt());
-    const rawResponse = await this.config.llm.complete(messages, this.config.llmConfig);
-    const llmResponse = this.normalizeLLMResponse(rawResponse);
+
+    const llmSpan = this.config.tracing?.startLLMSpan(
+      'mock',
+      this.config.llmConfig?.model ?? 'default',
+      'general'
+    );
+
+    let llmResponse: LLMResponse;
+    try {
+      const rawResponse = await this.config.llm.complete(messages, this.config.llmConfig);
+      llmResponse = this.normalizeLLMResponse(rawResponse);
+      if (llmSpan) {
+        this.config.tracing?.recordLLMUsage(llmSpan, llmResponse.usage);
+      }
+    } catch (error) {
+      if (llmSpan) {
+        this.config.tracing?.recordLLMError(llmSpan, error instanceof Error ? error : new Error(String(error)));
+      }
+      throw error;
+    }
 
     let next = AgentStateMachine.addTokenUsage(thinkingState, llmResponse.usage.totalTokens);
     next = AgentStateMachine.addMessage(next, {
