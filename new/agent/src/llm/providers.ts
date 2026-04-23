@@ -212,6 +212,44 @@ export class OpenRouterProvider extends OpenAIProvider {
   }
 }
 
+export class LMStudioProvider extends OpenAIProvider {
+  constructor(config?: Partial<HttpProviderConfig>) {
+    super({
+      name: 'lmstudio',
+      baseUrl: 'http://localhost:1234/v1/chat/completions',
+      defaultModel: 'local-model',
+      ...config,
+    });
+  }
+
+  protected headers(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      // LM Studio generally doesn't require an API key
+      Authorization: `Bearer ${this.config.apiKey ?? 'lm-studio'}`,
+    };
+  }
+}
+
+export class OllamaProvider extends OpenAIProvider {
+  constructor(config?: Partial<HttpProviderConfig>) {
+    super({
+      name: 'ollama',
+      baseUrl: 'http://localhost:11434/v1/chat/completions',
+      defaultModel: 'llama3',
+      ...config,
+    });
+  }
+
+  protected headers(): Record<string, string> {
+    return {
+      'Content-Type': 'application/json',
+      // Ollama doesn't require an API key
+      Authorization: `Bearer ollama`,
+    };
+  }
+}
+
 export class MockLLMProvider implements LLMProvider {
   readonly name = 'mock';
   readonly defaultModel = 'mock-model';
@@ -251,7 +289,7 @@ export class MockLLMProvider implements LLMProvider {
   }
 }
 
-export function providerFromEnv(name: 'openai' | 'anthropic' | 'openrouter'): LLMProvider {
+export function providerFromEnv(name: 'openai' | 'anthropic' | 'openrouter' | 'lmstudio' | 'ollama'): LLMProvider {
   switch (name) {
     case 'openai':
       return new OpenAIProvider({ apiKey: process.env.OPENAI_API_KEY });
@@ -259,6 +297,10 @@ export function providerFromEnv(name: 'openai' | 'anthropic' | 'openrouter'): LL
       return new AnthropicProvider({ apiKey: process.env.ANTHROPIC_API_KEY });
     case 'openrouter':
       return new OpenRouterProvider({ apiKey: process.env.OPENROUTER_API_KEY });
+    case 'lmstudio':
+      return new LMStudioProvider();
+    case 'ollama':
+      return new OllamaProvider();
   }
 }
 

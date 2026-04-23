@@ -444,8 +444,8 @@ Pronto quando: comandos sao executados de forma rastreavel, limitada e recuperav
 - [x] Suportar OpenAI como provider primary.
 - [x] Suportar Anthropic como provider alternativo.
 - [x] Suportar OpenRouter como fallback/custo.
-- [ ] Suportar Ollama (Local).
-- [ ] Suportar LM Studio (Local).
+- [x] Suportar Ollama (Local).
+- [x] Suportar LM Studio (Local).
 - [x] Implementar roteamento por tarefa:
   - [x] planejamento
   - [x] codigo
