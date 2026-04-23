@@ -225,6 +225,7 @@ export interface LLMResponse {
   toolCalls?: ToolCall[];
   finalResponse?: LLMFinalResponse;
   parseError?: string;
+  finishReason?: 'stop' | 'length' | 'content_filter' | 'tool_calls' | 'error' | 'other';
   usage: {
     promptTokens: number;
     completionTokens: number;

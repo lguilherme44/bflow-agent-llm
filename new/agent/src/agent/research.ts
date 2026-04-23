@@ -1,6 +1,7 @@
 import { Span } from '@opentelemetry/api';
 import { ReActAgent, ReActConfig } from './react-loop.js';
 import { AgentState, ResearchBrief } from '../types/index.js';
+import { LLMResponseParser } from '../llm/adapter.js';
 import { createTool } from '../tools/schema.js';
 import { ToolRegistry } from '../tools/registry.js';
 
@@ -100,6 +101,31 @@ export class ResearchAgent {
       if (exec.call.toolName === 'submit_research_brief' && exec.result.success) {
         brief = exec.call.arguments as unknown as ResearchBrief;
         break;
+      }
+    }
+
+    if (!brief) {
+      // Fallback: Check last assistant message for a JSON brief if tool call was missed or truncated
+      const assistantMessages = state.messages.filter(m => m.role === 'assistant');
+      for (let i = assistantMessages.length - 1; i >= 0; i--) {
+        const content = assistantMessages[i].content;
+        if (content && (content.includes('summary') || content.includes('title'))) {
+          try {
+            // We use the same parser logic to find JSON blocks
+            const jsonText = LLMResponseParser.extractJson(content) || content;
+            const parsed = JSON.parse(jsonText.includes('{') ? jsonText.slice(jsonText.indexOf('{'), jsonText.lastIndexOf('}') + 1) : '{}');
+            if (parsed.summary || parsed.taskType) {
+              brief = {
+                taskType: (parsed.taskType as any) || 'investigation',
+                entryPoints: Array.isArray(parsed.entryPoints) ? parsed.entryPoints : [],
+                dependencies: Array.isArray(parsed.dependencies) ? parsed.dependencies : [],
+                risks: Array.isArray(parsed.risks) ? parsed.risks : [],
+                summary: Array.isArray(parsed.summary) ? parsed.summary.join('\n') : String(parsed.summary || '')
+              };
+              break;
+            }
+          } catch { /* ignore parsing errors in fallback */ }
+        }
       }
     }
 

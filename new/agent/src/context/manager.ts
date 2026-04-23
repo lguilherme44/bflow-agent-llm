@@ -22,8 +22,8 @@ export class ContextManager {
   constructor(config?: Partial<ContextConfig>) {
     this.config = {
       maxMessages: 50,
-      maxTokensEstimate: 8_000,
-      summarizeThreshold: 30,
+      maxTokensEstimate: 3_500, // Ajustado para modelos locais com context window pequena (ex: 4096)
+      summarizeThreshold: 20,
       ...config,
     };
   }

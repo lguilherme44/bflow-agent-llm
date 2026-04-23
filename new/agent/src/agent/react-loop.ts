@@ -326,6 +326,12 @@ export class ReActAgent {
       this.config.logger?.logEvent(state.id, 'llm_content_debug', { 
         content: llmResponse.content.slice(0, 2000) 
       });
+
+      if (llmResponse.finishReason === 'length') {
+        const errorMsg = '⚠️ LIMITE DE CONTEXTO ATINGIDO: O modelo cortou a resposta por falta de espaço. Tente aumentar o n_ctx no LM Studio ou limpar o histórico.';
+        this.config.onUpdate?.({ type: 'error', message: errorMsg });
+        this.config.logger?.logEvent(state.id, 'context_limit_reached', { tokens: llmResponse.usage.totalTokens });
+      }
     } catch (error) {
       if (llmSpan) {
         this.config.tracing?.recordLLMError(llmSpan, error instanceof Error ? error : new Error(String(error)));

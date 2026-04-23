@@ -49,7 +49,7 @@ export class LLMResponseParser {
     return { thought: parsed.thought, toolCalls: parsed.toolCalls };
   }
 
-  private static extractJson(content: string): string | null {
+  static extractJson(content: string): string | null {
     const fenced = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     if (fenced?.[1]) {
       return fenced[1];

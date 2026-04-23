@@ -1,4 +1,4 @@
-import { AgentMessage, LLMConfig, LLMProvider, LLMProviderRequest, LLMProviderResponse } from '../types/index.js';
+import { AgentMessage, LLMConfig, LLMResponse, LLMProvider, LLMProviderRequest, LLMProviderResponse } from '../types/index.js';
 import { LLMResponseParser } from './adapter.js';
 import { redactMessages } from './redaction.js';
 
@@ -44,6 +44,7 @@ abstract class BaseHttpProvider implements LLMProvider {
     const payload = (await response.json()) as Record<string, unknown>;
     const content = this.extractContent(payload);
     const usage = this.extractUsage(payload);
+    const finishReason = this.extractFinishReason(payload);
     const parsed = LLMResponseParser.parse(content);
     const latencyMs = Date.now() - startedAt;
 
@@ -52,6 +53,7 @@ abstract class BaseHttpProvider implements LLMProvider {
       toolCalls: parsed.toolCalls.length > 0 ? parsed.toolCalls : undefined,
       finalResponse: parsed.finalResponse,
       parseError: parsed.parseError,
+      finishReason,
       usage,
       provider: this.name,
       model,
@@ -63,6 +65,7 @@ abstract class BaseHttpProvider implements LLMProvider {
   protected abstract body(request: LLMProviderRequest, model: string): Record<string, unknown>;
   protected abstract extractContent(payload: Record<string, unknown>): string;
   protected abstract extractUsage(payload: Record<string, unknown>): LLMProviderResponse['usage'];
+  protected abstract extractFinishReason(payload: Record<string, unknown>): LLMResponse['finishReason'];
 
   protected endpoint(): string {
     return this.config.baseUrl;
@@ -135,6 +138,18 @@ export class OpenAIProvider extends BaseHttpProvider {
     return first.message?.content ?? '';
   }
 
+  protected extractFinishReason(payload: Record<string, unknown>): LLMResponse['finishReason'] {
+    const choices = payload.choices;
+    if (!Array.isArray(choices) || choices.length === 0) {
+      return undefined;
+    }
+    const reason = (choices[0] as { finish_reason?: string }).finish_reason;
+    if (reason === 'stop' || reason === 'length' || reason === 'content_filter' || reason === 'tool_calls') {
+      return reason;
+    }
+    return 'other';
+  }
+
   protected extractUsage(payload: Record<string, unknown>): LLMProviderResponse['usage'] {
     const usage = payload.usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
     return {
@@ -187,6 +202,14 @@ export class AnthropicProvider extends BaseHttpProvider {
     return content
       .map((item) => (typeof item === 'object' && item !== null && 'text' in item ? String(item.text) : ''))
       .join('');
+  }
+
+  protected extractFinishReason(payload: Record<string, unknown>): LLMResponse['finishReason'] {
+    const reason = payload.stop_reason as string | undefined;
+    if (reason === 'end_turn' || reason === 'stop_sequence') return 'stop';
+    if (reason === 'max_tokens') return 'length';
+    if (reason === 'tool_use') return 'tool_calls';
+    return 'other';
   }
 
   protected extractUsage(payload: Record<string, unknown>): LLMProviderResponse['usage'] {
