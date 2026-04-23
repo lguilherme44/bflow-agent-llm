@@ -126,9 +126,11 @@ export class LLMResponseParser {
     }
 
     // Suporte para resumo no topo do objeto (comum em modelos menores)
-    if (typeof parsed.summary === 'string' && !parsed.tool && !parsed.toolCalls) {
+    const summary = parsed.summary ?? parsed.finalResponse;
+    if (summary && !parsed.tool && !parsed.toolCalls) {
         const status = parsed.status === 'failure' ? 'failure' : 'success';
-        return { status, summary: parsed.summary };
+        const summaryText = Array.isArray(summary) ? summary.join('\n') : String(summary);
+        return { status, summary: summaryText };
     }
 
     return undefined;

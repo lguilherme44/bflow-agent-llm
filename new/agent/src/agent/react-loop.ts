@@ -212,6 +212,13 @@ export class ReActAgent {
           break;
         }
 
+        const verification = this.verify(state);
+        state = verification.state;
+        await this.config.checkpointManager.checkpoint(state);
+        if (verification.terminal) {
+          break;
+        }
+
         const toolCalls = response.llmResponse.toolCalls ?? [];
         if (toolCalls.length === 0) {
           // Instead of auto-completing, we warn the model that it must use a tool or complete_task.
@@ -238,13 +245,6 @@ export class ReActAgent {
           return state;
         }
 
-        const verification = this.verify(state);
-        state = verification.state;
-        await this.config.checkpointManager.checkpoint(state);
-
-        if (verification.terminal) {
-          break;
-        }
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -398,6 +398,36 @@ export class ReActAgent {
   }
 
   private verify(state: AgentState): VerificationResult {
+    const lastMessage = state.messages.at(-1);
+    const isEmptyResponse = lastMessage?.role === 'assistant' && 
+                            (!lastMessage.content?.trim() || lastMessage.content === 'Processando...') && 
+                            (!lastMessage.toolCalls || lastMessage.toolCalls.length === 0);
+
+    if (isEmptyResponse) {
+      // If the LLM returns nothing, it's often stuck or context is full.
+      // We'll treat this as a failure loop to trigger a correction or termination.
+      const correction = "Você retornou uma resposta vazia sem chamar nenhuma ferramenta. Se você concluiu a tarefa, use 'complete_task'. Se precisar de mais informações, use as ferramentas de busca ou leitura.";
+      const next = AgentStateMachine.addMessage(state, {
+        role: 'system',
+        content: correction,
+        timestamp: new Date().toISOString(),
+      });
+      
+      // If it repeats 3 times, fail the task
+      const recentEmpty = state.messages.slice(-10).filter(m => 
+        m.role === 'assistant' && !m.content?.trim() && (!m.toolCalls || m.toolCalls.length === 0)
+      ).length;
+      
+      if (recentEmpty >= 3) {
+        return {
+          terminal: true,
+          state: AgentStateMachine.fail(state, "A IA está retornando respostas vazias repetidamente. Verifique a configuração do modelo local ou o limite de contexto."),
+        };
+      }
+
+      return { terminal: false, state: next };
+    }
+
     if (AgentStateMachine.isStuck(state)) {
       return {
         terminal: true,
@@ -419,6 +449,12 @@ export class ReActAgent {
         `\n2. Use uma ferramenta DIFERENTE (ex: list_files, read_file, git_status).` +
         `\n3. Se não tem informação suficiente, use 'complete_task' com status 'failure' e explique o problema.` +
         `\nNÃO repita a mesma chamada com os mesmos argumentos.`;
+
+      // Terminate on any repeated failure loop (same args, same failure)
+      return {
+        terminal: true,
+        state: AgentStateMachine.fail(state, `Repeated failure loop detected: ${failureLoop}`),
+      };
 
       const next = AgentStateMachine.addMessage(state, {
         role: 'system',

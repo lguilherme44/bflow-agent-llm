@@ -143,16 +143,25 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
       .parameters({
         type: 'object',
         properties: {
-          query: { type: 'string', minLength: 1 },
+          query: { type: 'string' },
           directory: { type: 'string' },
         },
         required: ['query'],
         additionalProperties: false,
       })
       .example('Search for a symbol', { query: 'ReActAgent', directory: 'src' })
-      .handler(async (args) => ({
-        matches: await searchText(workspaceRoot, stringArg(args.query, 'query'), typeof args.directory === 'string' ? args.directory : '.'),
-      }))
+      .handler(async (args) => {
+        const query = typeof args.query === 'string' ? args.query : '';
+        if (!query) {
+          return {
+            matches: [],
+            tip: 'The query was empty. Use list_files if you want to browse the directory structure, or provide a concrete search term.',
+          };
+        }
+        return {
+          matches: await searchText(workspaceRoot, query, typeof args.directory === 'string' ? args.directory : '.'),
+        };
+      })
       .build()
   );
 
@@ -665,6 +674,45 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
       .expectedOutput('Porcelain status output.')
       .parameters({ type: 'object', properties: {}, additionalProperties: false })
       .handler(async () => ({ status: await git.getStatus() }))
+      .build()
+  );
+
+  registry.register(
+    createTool()
+      .name('repo_browser')
+      .summary('Alias for list_files or read_file (compatibility)')
+      .description('A compatibility alias for legacy or hallucinated tool calls. Redirects to list_files if directory/extensions are provided, or read_file if filepath is provided.')
+      .parameters({
+        type: 'object',
+        properties: {
+          directory: { type: 'string' },
+          extensions: { type: 'array', items: { type: 'string' } },
+          filepath: { type: 'string' },
+          query: { type: 'string' },
+        },
+        additionalProperties: true,
+      })
+      .handler(async (args) => {
+        if (typeof args.filepath === 'string') {
+          return editing.readFileWithAst(args.filepath);
+        }
+        if (typeof args.query === 'string' && args.query.length > 0) {
+          return {
+            matches: await searchText(
+              workspaceRoot,
+              args.query,
+              typeof args.directory === 'string' ? args.directory : '.'
+            ),
+          };
+        }
+        return {
+          files: await listFiles(
+            workspaceRoot,
+            typeof args.directory === 'string' ? args.directory : '.',
+            arrayArg(args.extensions)
+          ),
+        };
+      })
       .build()
   );
 

@@ -21,7 +21,8 @@ export class ResearchAgent {
       'retrieve_context', 
       'git_status',
       'run_command',
-      'execute_command'
+      'execute_command',
+      'repo_browser'
     ];
     for (const toolName of essentialTools) {
       const tool = config.registry.get(toolName);

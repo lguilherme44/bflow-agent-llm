@@ -383,7 +383,7 @@ export class ToolExecutor {
       case 'CRITICAL_ERROR':
         return 'Stop and inspect rollback/side effects before continuing.';
       case 'TOOL_NOT_FOUND':
-        return 'Use only registered tool names.';
+        return `Use only registered tool names: ${this.registry.list().map(t => t.schema.name).join(', ')}`;
       case 'HUMAN_REJECTED':
         return 'Explain the rejection to the LLM and choose a non-destructive alternative.';
       case 'EXECUTION_ERROR':
