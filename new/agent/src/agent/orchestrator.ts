@@ -1,15 +1,26 @@
 import { ReActAgent, ReActConfig } from './react-loop.js';
-import { AgentState, ExecutionPlan, ExecutionStream, ResearchBrief } from '../types/index.js';
+import { AgentState, ExecutionPlan, ExecutionStream, FeedbackIteration, FeedbackLoopPolicy, ResearchBrief } from '../types/index.js';
 import { ResearchAgent } from './research.js';
 import { PlanningAgent } from './planning.js';
+import { FeedbackLoopEngine } from './feedback-loop.js';
 import { AgentStateMachine } from '../state/machine.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { createDevelopmentToolRegistry } from '../tools/development-tools.js';
 import { RiskPolicyEngine } from '../utils/risk-engine.js';
 import { LLMResponseParser } from '../llm/adapter.js';
-import { CODER_PROMPT, DEBUG_PROMPT, REVIEWER_PROMPT, TESTER_PROMPT } from '../prompts/specialized.js';
+import { 
+    CODER_PROMPT, 
+    DEBUG_PROMPT, 
+    REVIEWER_PROMPT, 
+    TESTER_PROMPT,
+    SECURITY_REVIEWER_PROMPT,
+    PERFORMANCE_REVIEWER_PROMPT,
+    UX_REVIEWER_PROMPT,
+    ERROR_HANDLING_REVIEWER_PROMPT
+} from '../prompts/specialized.js';
 import { WorkspaceManager } from '../code/workspace-manager.js';
 import { TerminalService } from '../code/terminal-service.js';
+import { HookService } from './hook-service.js';
 
 export type OrchestratorEvent = 
   | { type: 'phase_start'; phase: string }
@@ -29,11 +40,13 @@ export class OrchestratorAgent {
   private liveConfig: ReActConfig;
   private approvalResolver?: (approved: boolean) => void;
   private riskEngine: RiskPolicyEngine;
+  private feedbackLoop: FeedbackLoopEngine;
   private workspaceManager: WorkspaceManager;
   private workspaceRoot: string;
   private fallbackHumanApprovalCallback?: ReActConfig['humanApprovalCallback'];
+  private hookService: HookService;
 
-  constructor(private config: ReActConfig) {
+  constructor(private config: ReActConfig, feedbackPolicy?: Partial<FeedbackLoopPolicy>) {
     const languageInstruction = "\n\nIMPORTANT: Always respond in the same language as the user's prompt. If the user speaks Portuguese, you MUST respond in Portuguese.";
     
     this.config.llmConfig = {
@@ -43,7 +56,9 @@ export class OrchestratorAgent {
 
     this.workspaceRoot = (this.config.registry as { workspaceRoot?: string }).workspaceRoot || process.cwd();
     this.riskEngine = new RiskPolicyEngine(this.workspaceRoot);
+    this.feedbackLoop = new FeedbackLoopEngine(feedbackPolicy);
     this.fallbackHumanApprovalCallback = this.config.humanApprovalCallback;
+    this.hookService = new HookService(this.workspaceRoot);
     const terminal = new TerminalService(this.workspaceRoot);
     this.workspaceManager = new WorkspaceManager(this.workspaceRoot, terminal);
     this.liveConfig = {
@@ -84,7 +99,8 @@ export class OrchestratorAgent {
             }
 
             return false;
-        }
+        },
+        hookService: this.hookService
     };
 
     this.researchAgent = new ResearchAgent(this.liveConfig);
@@ -339,14 +355,26 @@ export class OrchestratorAgent {
 
       for (const stream of readyStreams) {
         const result = await this.executeStream(state, plan, brief, stream, executionSpan);
-        results.push(result);
-        pendingStreams.delete(stream.id);
 
         if (result.error) {
-          return results;
+          // ── Feedback Loop: attempt recovery before propagating ──
+          const recovered = await this.attemptFeedbackLoop(
+            state, plan, brief, stream, result.error, executionSpan
+          );
+
+          if (recovered) {
+            results.push({ streamId: stream.id });
+            completedStreams.add(stream.id);
+          } else {
+            results.push(result);
+            return results;
+          }
+        } else {
+          results.push(result);
+          completedStreams.add(stream.id);
         }
 
-        completedStreams.add(stream.id);
+        pendingStreams.delete(stream.id);
       }
     }
 
@@ -443,6 +471,125 @@ export class OrchestratorAgent {
     }
   }
 
+  /**
+   * Attempt to recover a failed stream through the feedback loop.
+   * Classifies the failure, creates a recovery stream, and retries
+   * with the correct specialist agent up to maxRetries times.
+   */
+  private async attemptFeedbackLoop(
+    state: AgentState,
+    plan: ExecutionPlan,
+    brief: ResearchBrief,
+    originalStream: ExecutionStream,
+    error: string,
+    executionSpan?: ReturnType<NonNullable<ReActConfig['tracing']>['startPhaseSpan']>
+  ): Promise<boolean> {
+    const logger = this.config.logger;
+    const tracing = this.config.tracing;
+    const failureKind = this.feedbackLoop.classifyFromError(error);
+
+    this.notify({
+      type: 'message_added',
+      role: 'system',
+      content: `Feedback Loop: falha classificada como '${failureKind}' no stream "${originalStream.name}". Tentando recuperação automática...`,
+    });
+
+    while (this.feedbackLoop.shouldRetry(originalStream.id, this.totalUsage.totalTokens)) {
+      const iteration = this.feedbackLoop.getIterationCount(originalStream.id) + 1;
+      const recoveryStream = this.feedbackLoop.createRecoveryStream(originalStream, failureKind, error);
+      const promptRole = this.feedbackLoop.getPromptRoleForFailure(failureKind);
+
+      const feedbackSpan = tracing?.startFeedbackLoopSpan(
+        originalStream.id,
+        iteration,
+        failureKind,
+        executionSpan
+      );
+
+      this.notify({
+        type: 'message_added',
+        role: 'system',
+        content: `Feedback Loop iteração ${iteration}/${this.feedbackLoop.getPolicy().maxRetries}: delegando para ${promptRole}...`,
+      });
+      logger?.logEvent(state.id, 'feedback_loop_started', {
+        streamId: originalStream.id,
+        iteration,
+        failureKind,
+        delegatedTo: promptRole,
+      });
+
+      const tokensBefore = this.totalUsage.totalTokens;
+
+      // Execute the recovery stream using the appropriate prompt role
+      const recoveryResult = await this.executeStream(
+        state,
+        plan,
+        brief,
+        { ...recoveryStream, owner: recoveryStream.owner },
+        feedbackSpan
+      );
+
+      const feedbackRecord: FeedbackIteration = {
+        iteration,
+        failureKind,
+        delegatedTo: recoveryStream.owner,
+        streamId: originalStream.id,
+        recoveryStreamId: recoveryStream.id,
+        error: error.slice(0, 1000),
+        resolved: !recoveryResult.error,
+        tokensBefore,
+        tokensAfter: this.totalUsage.totalTokens,
+      };
+
+      if (!recoveryResult.error) {
+        feedbackRecord.resolvedAt = new Date().toISOString();
+      }
+
+      this.feedbackLoop.recordIteration(feedbackRecord);
+      logger?.logFeedbackIteration(state.id, feedbackRecord);
+
+      feedbackSpan?.setAttributes({
+        'feedback_loop.resolved': feedbackRecord.resolved,
+        'feedback_loop.tokens_used': (feedbackRecord.tokensAfter ?? tokensBefore) - tokensBefore,
+      });
+      feedbackSpan?.end();
+
+      if (!recoveryResult.error) {
+        this.notify({
+          type: 'message_added',
+          role: 'system',
+          content: `Feedback Loop: recuperação bem-sucedida na iteração ${iteration}.`,
+        });
+        logger?.logEvent(state.id, 'feedback_loop_resolved', {
+          streamId: originalStream.id,
+          iteration,
+          failureKind,
+        });
+        return true;
+      }
+
+      // Update error for next iteration classification
+      error = recoveryResult.error;
+    }
+
+    // Exhausted retries or budget
+    const iterationCount = this.feedbackLoop.getIterationCount(originalStream.id);
+    const reason = this.totalUsage.totalTokens >= this.feedbackLoop.getPolicy().maxCostTokens
+      ? `Feedback Loop encerrado: orçamento de tokens excedido (${this.totalUsage.totalTokens} >= ${this.feedbackLoop.getPolicy().maxCostTokens}).`
+      : `Feedback Loop encerrado: máximo de ${iterationCount} tentativas atingido para stream "${originalStream.name}".`;
+
+    this.notify({ type: 'error', message: reason });
+    logger?.logEvent(state.id, 'feedback_loop_exhausted', {
+      streamId: originalStream.id,
+      iterations: iterationCount,
+      failureKind,
+      reason,
+      patterns: this.feedbackLoop.getFailurePatterns(),
+    });
+
+    return false;
+  }
+
   private extractWorkerSummary(state: AgentState): string {
     const completionResult = state.toolHistory.find((entry) => entry.call.toolName === 'complete_task')?.result;
     const completionData = completionResult?.data as { summary?: unknown } | undefined;
@@ -480,6 +627,10 @@ export class OrchestratorAgent {
     switch (role.toLowerCase()) {
       case 'coder': return CODER_PROMPT;
       case 'reviewer': return REVIEWER_PROMPT;
+      case 'security_reviewer': return SECURITY_REVIEWER_PROMPT;
+      case 'performance_reviewer': return PERFORMANCE_REVIEWER_PROMPT;
+      case 'ux_reviewer': return UX_REVIEWER_PROMPT;
+      case 'error_reviewer': return ERROR_HANDLING_REVIEWER_PROMPT;
       case 'tester':
       case 'test': return TESTER_PROMPT;
       case 'debug': return DEBUG_PROMPT;

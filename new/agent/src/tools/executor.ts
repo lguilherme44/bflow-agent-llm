@@ -21,6 +21,7 @@ export interface ExecutorConfig {
   retryMaxDelayMs: number;
   retryJitterRatio: number;
   enableRollback: boolean;
+  maxIterations: number;
 }
 
 export interface ToolExecutorHooks {
@@ -29,6 +30,8 @@ export interface ToolExecutorHooks {
   onToolSuccess?: (toolCall: ToolCall, result: ToolResult) => void | Promise<void>;
   onToolFailure?: (toolCall: ToolCall, result: ToolResult) => void | Promise<void>;
   onRollback?: (toolCall: ToolCall, result: RollbackResult) => void | Promise<void>;
+  onPreExecute?: (toolCall: ToolCall) => Promise<ToolResult | undefined>;
+  onPostExecute?: (toolCall: ToolCall, result: ToolResult) => Promise<ToolResult | undefined>;
 }
 
 class ToolValidationError extends Error {
@@ -62,6 +65,7 @@ export class ToolExecutor {
       retryMaxDelayMs: 5_000,
       retryJitterRatio: 0.2,
       enableRollback: true,
+      maxIterations: 10,
       ...config,
     };
     this.hooks = hooks ?? {};
@@ -88,6 +92,15 @@ export class ToolExecutor {
     let timedOut = false;
     let attemptsMade = 0;
 
+    // Check pre-execute hooks (e.g., rule enforcement)
+    if (this.hooks.onPreExecute) {
+      const hookResult = await this.hooks.onPreExecute(toolCall);
+      if (hookResult) {
+        await this.hooks.onToolFailure?.(toolCall, hookResult);
+        return hookResult;
+      }
+    }
+
     for (let attempt = 1; attempt <= maxRetries + 1; attempt += 1) {
       attemptsMade = attempt;
       await this.hooks.onToolStart?.(toolCall, attempt);
@@ -105,6 +118,15 @@ export class ToolExecutor {
           timedOut: false,
           recoverable: true,
         };
+
+        // Check post-execute hooks
+        if (this.hooks.onPostExecute) {
+          const hookResult = await this.hooks.onPostExecute(toolCall, result);
+          if (hookResult) {
+            await this.hooks.onToolFailure?.(toolCall, hookResult);
+            return hookResult;
+          }
+        }
 
         await this.hooks.onToolSuccess?.(toolCall, result);
         return result;

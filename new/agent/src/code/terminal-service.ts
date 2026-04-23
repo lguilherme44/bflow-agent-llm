@@ -3,6 +3,7 @@ import { assertInsideWorkspace } from './source.js';
 import { UnifiedLogger } from '../observability/logger.js';
 import { RiskPolicyEngine } from '../utils/risk-engine.js';
 import { TracingService } from '../observability/tracing.js';
+import { createSandbox, type SandboxExecutor, type SandboxMode, type SandboxResult } from './sandbox-executor.js';
 
 export interface CommandResult {
   command: string;
@@ -23,10 +24,12 @@ export interface TerminalServiceConfig {
   agentId?: string;
   riskEngine?: RiskPolicyEngine;
   tracing?: TracingService;
+  sandboxMode?: SandboxMode;
 }
 
 export class TerminalService {
   private readonly config: TerminalServiceConfig;
+  private readonly sandbox: SandboxExecutor | null;
 
   constructor(private readonly workspaceRoot = process.cwd(), config?: Partial<TerminalServiceConfig>) {
     this.config = {
@@ -43,12 +46,32 @@ export class TerminalService {
       ],
       ...config,
     };
+
+    // Initialize sandbox if mode is docker or auto
+    const sandboxMode = this.config.sandboxMode ?? 'native';
+    if (sandboxMode !== 'native') {
+      try {
+        this.sandbox = createSandbox(sandboxMode, {
+          timeoutMs: this.config.timeoutMs,
+          outputLimit: this.config.outputLimit,
+        });
+      } catch {
+        this.sandbox = null;
+      }
+    } else {
+      this.sandbox = null;
+    }
   }
 
   async executeCommand(command: string, cwd = '.'): Promise<CommandResult> {
     const parsed = parseCommand(command);
     if (!parsed) {
       throw new Error('Command cannot be empty');
+    }
+
+    // Delegate to sandbox if available and active
+    if (this.sandbox?.isSandboxed) {
+      return this.executeSandboxed(command, cwd);
     }
 
     return this.execute(parsed.executable, parsed.args, cwd, command);
@@ -204,6 +227,56 @@ export class TerminalService {
 
   private redact(value: string): string {
     return value.replace(/(password|token|secret|api[_-]?key)=\S+/gi, '$1=[REDACTED]');
+  }
+
+  /**
+   * Execute a command through the Docker sandbox.
+   */
+  private async executeSandboxed(command: string, cwd: string): Promise<CommandResult> {
+    const riskEngine = this.config.riskEngine ?? new RiskPolicyEngine();
+    const evaluation = riskEngine.evaluateToolCall('execute_command', { command });
+
+    if (evaluation.level === 'blocked') {
+      throw new Error(`Command blocked by risk policy: ${evaluation.reasons.join(', ')}`);
+    }
+
+    const resolvedCwd = assertInsideWorkspace(this.workspaceRoot, cwd);
+    const span = this.config.tracing?.startTerminalSpan(command, resolvedCwd);
+
+    const sandboxResult: SandboxResult = await this.sandbox!.execute(command, cwd, this.workspaceRoot);
+
+    const redactedCommand = this.redact(command);
+    const redactedStdout = this.redact(sandboxResult.stdout);
+    const redactedStderr = this.redact(sandboxResult.stderr);
+
+    if (this.config.logger) {
+      this.config.logger.logCommandExecution(
+        this.config.agentId ?? 'system',
+        `[sandbox] ${redactedCommand}`,
+        resolvedCwd,
+        sandboxResult.exitCode,
+        sandboxResult.durationMs,
+        `stdout: ${redactedStdout.slice(0, 500)}\nstderr: ${redactedStderr.slice(0, 500)}`
+      );
+    }
+
+    if (span && this.config.tracing) {
+      this.config.tracing.recordTerminalResult(span, {
+        exitCode: sandboxResult.exitCode,
+        durationMs: sandboxResult.durationMs,
+        timedOut: sandboxResult.timedOut,
+      });
+    }
+
+    return {
+      command: redactedCommand,
+      cwd: resolvedCwd,
+      exitCode: sandboxResult.exitCode,
+      durationMs: sandboxResult.durationMs,
+      stdout: redactedStdout,
+      stderr: redactedStderr,
+      timedOut: sandboxResult.timedOut,
+    };
   }
 }
 

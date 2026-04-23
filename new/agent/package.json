@@ -3,6 +3,10 @@
   "version": "1.0.0",
   "description": "Checkpointable ReAct coding agent core",
   "main": "dist/index.js",
+  "bin": {
+    "agent": "dist/cli.js",
+    "vagent": "dist/visual-cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
@@ -27,11 +31,13 @@
   },
   "dependencies": {
     "@ast-grep/napi": "^0.42.1",
+    "@lancedb/lancedb": "^0.27.2",
     "@opentelemetry/api": "^1.9.0",
     "@opentelemetry/exporter-trace-otlp-http": "^0.57.0",
     "@opentelemetry/sdk-node": "^0.57.0",
     "@opentelemetry/sdk-trace-base": "^1.30.0",
     "@opentelemetry/semantic-conventions": "^1.28.0",
+    "apache-arrow": "^18.1.0",
     "commander": "^14.0.3",
     "ink": "^7.0.1",
     "ink-spinner": "^5.0.0",

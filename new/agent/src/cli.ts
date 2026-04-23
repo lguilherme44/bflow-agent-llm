@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { OrchestratorAgent } from './agent/orchestrator.js';
 import { ContextManager } from './context/manager.js';
 import { CheckpointManager, FileCheckpointStorage } from './state/checkpoint.js';
@@ -5,11 +6,11 @@ import { createDevelopmentToolRegistry } from './tools/development-tools.js';
 import { providerFromEnv, LMStudioProvider, OllamaProvider } from './llm/providers.js';
 import { RouterLLMAdapter, LLMRouter } from './llm/router.js';
 import { UnifiedLogger } from './observability/logger.js';
-import path from 'path';
+import path from 'node:path';
+import fs from 'node:fs';
 
 async function main() {
   const args = process.argv.slice(2);
-  const task = args.filter(a => !a.startsWith('--')).join(' ') || 'Explore the codebase';
   
   // Default logic: environment variable or fallback to lmstudio
   let defaultProvider = 'lmstudio';
@@ -18,10 +19,25 @@ async function main() {
 
   const providerName = (args.find(a => a.startsWith('--provider=')) || `--provider=${defaultProvider}`).split('=')[1];
   
+  // Logs moved after final task resolution
+
+  const positionalArgs = args.filter(a => !a.startsWith('--'));
+  let workspaceRoot = process.cwd();
+  let task = positionalArgs.join(' ') || 'Explore the codebase';
+
+  // If the first positional argument is a valid directory, use it as workspaceRoot
+  if (positionalArgs.length > 0) {
+    const candidatePath = path.resolve(process.cwd(), positionalArgs[0]);
+    if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isDirectory()) {
+      workspaceRoot = candidatePath;
+      task = positionalArgs.slice(1).join(' ') || 'Explore the codebase';
+    }
+  }
+
   console.log(`Starting agent with provider: ${providerName}`);
+  console.log(`Workspace: ${workspaceRoot}`);
   console.log(`Task: ${task}`);
 
-  const workspaceRoot = process.cwd();
   const registry = createDevelopmentToolRegistry({ workspaceRoot });
   const checkpointManager = new CheckpointManager(new FileCheckpointStorage(path.join(workspaceRoot, '.agent', 'checkpoints')));
   const contextManager = new ContextManager();

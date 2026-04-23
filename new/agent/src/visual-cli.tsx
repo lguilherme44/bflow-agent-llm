@@ -1,4 +1,6 @@
-import path from 'path';
+#!/usr/bin/env node
+import path from 'node:path';
+import fs from 'node:fs';
 import { render } from 'ink';
 import { OrchestratorAgent } from './agent/orchestrator.js';
 import { ContextManager } from './context/manager.js';
@@ -47,9 +49,20 @@ function resolveProvider(providerName: ProviderName) {
 async function main() {
   const args = process.argv.slice(2);
   const providerName = resolveProviderName(args);
-  const initialTask = args.filter((arg) => !arg.startsWith('--')).join(' ').trim();
+  const positionalArgs = args.filter((arg) => !arg.startsWith('--'));
+  
+  let workspaceRoot = process.cwd();
+  let initialTask = positionalArgs.join(' ').trim() || 'Explore the codebase';
 
-  const workspaceRoot = process.cwd();
+  // If the first positional argument is a valid directory, use it as workspaceRoot
+  if (positionalArgs.length > 0) {
+    const candidatePath = path.resolve(process.cwd(), positionalArgs[0]);
+    if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isDirectory()) {
+      workspaceRoot = candidatePath;
+      initialTask = positionalArgs.slice(1).join(' ').trim() || 'Explore the codebase';
+    }
+  }
+
   const registry = createDevelopmentToolRegistry({ workspaceRoot });
   const checkpointManager = new CheckpointManager(
     new FileCheckpointStorage(path.join(workspaceRoot, '.agent', 'checkpoints'))

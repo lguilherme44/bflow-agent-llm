@@ -226,11 +226,12 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
       .example('Retrieve context for checkpointing', { task: 'resume checkpoint from awaiting_human', directory: 'src', limit: 5 })
       .handler(async (args) => {
         await rag.indexWorkspace(typeof args.directory === 'string' ? args.directory : '.');
+        const results = await rag.retrieveHybrid({
+          task: stringArg(args.task, 'task'),
+          limit: typeof args.limit === 'number' ? args.limit : 8,
+        });
         return {
-          results: rag.retrieve({
-            task: stringArg(args.task, 'task'),
-            limit: typeof args.limit === 'number' ? args.limit : 8,
-          }).map((result) => ({
+          results: results.map((result) => ({
             filepath: result.chunk.metadata.filepath,
             score: result.score,
             reasons: result.reasons,

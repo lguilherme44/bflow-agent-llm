@@ -12,6 +12,7 @@ import { TreeSitterParserService } from '../code/tree-sitter-parser.js';
 import { estimateTokensFromText } from '../utils/json.js';
 import lunr from 'lunr';
 import { RankingUtils } from './ranking-utils.js';
+import { LanceDBStore } from './lancedb-store.js';
 
 export interface RetrieveContextInput {
   task: string;
@@ -33,11 +34,14 @@ export class LocalRagService {
   private readonly chunks = new Map<string, RetrievalChunk>();
   private readonly fileHashes = new Map<string, string>();
   private lunrIndex: lunr.Index | null = null;
+  private readonly vectorStore: LanceDBStore;
 
   constructor(
     private readonly workspaceRoot = process.cwd(),
     private readonly parser = new TreeSitterParserService()
-  ) {}
+  ) {
+    this.vectorStore = new LanceDBStore(workspaceRoot);
+  }
 
   async indexWorkspace(directory = '.'): Promise<RagIndexStats> {
     const targetPath = path.resolve(this.workspaceRoot, directory);
@@ -63,6 +67,7 @@ export class LocalRagService {
     }
 
     this.rebuildLunrIndex();
+    await this.syncVectorStore();
 
     return {
       filesIndexed,
@@ -96,6 +101,13 @@ export class LocalRagService {
   }
 
   retrieve(input: RetrieveContextInput): RetrievalResult[] {
+    return this.retrieveSync(input);
+  }
+
+  /**
+   * Async retrieve that includes LanceDB vector search results.
+   */
+  async retrieveHybrid(input: RetrieveContextInput): Promise<RetrievalResult[]> {
     const limit = input.limit ?? 8;
     const filteredChunks = Array.from(this.chunks.values()).filter((chunk) =>
       this.matchesFilters(chunk, input.filters)
@@ -104,32 +116,47 @@ export class LocalRagService {
     if (filteredChunks.length === 0) return [];
 
     // 1. Lexical Search (lunr)
-    const lexicalResults: RetrievalChunk[] = [];
-    if (this.lunrIndex) {
-      const results = this.lunrIndex.search(input.task);
-      for (const res of results) {
-        const chunk = this.chunks.get(res.ref);
-        if (chunk && this.matchesFilters(chunk, input.filters)) {
-          lexicalResults.push(chunk);
-        }
-      }
-    }
+    const lexicalResults = this.lexicalSearch(input.task, input.filters);
 
     // 2. Recency Ranking
-    const recencyResults = [...filteredChunks].sort((a, b) => {
-      const dateA = new Date(a.metadata.modifiedAt).getTime();
-      const dateB = new Date(b.metadata.modifiedAt).getTime();
-      return dateB - dateA;
-    });
+    const recencyResults = this.recencyRank(filteredChunks);
 
-    // 3. Centrality Ranking (Simple heuristic: symbols in src > docs > tests)
-    const centralityResults = [...filteredChunks].sort((a, b) => {
-      const scoreA = (a.metadata.owner === 'src' ? 10 : 0) + a.metadata.symbols.length;
-      const scoreB = (b.metadata.owner === 'src' ? 10 : 0) + b.metadata.symbols.length;
-      return scoreB - scoreA;
-    });
+    // 3. Centrality Ranking
+    const centralityResults = this.centralityRank(filteredChunks);
 
-    // 4. Combine with RRF
+    // 4. Vector Search (LanceDB)
+    const vectorResults = await this.vectorSearch(input.task, input.filters, limit * 2);
+
+    // 5. Combine with RRF
+    const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults, vectorResults]);
+
+    return combined.slice(0, limit).map(({ item, score }) => {
+      const reasons: string[] = [];
+      if (lexicalResults.includes(item)) reasons.push('lexical match');
+      if (recencyResults.slice(0, 10).includes(item)) reasons.push('recent file');
+      if (centralityResults.slice(0, 10).includes(item)) reasons.push('structural centrality');
+      if (vectorResults.includes(item)) reasons.push('vector similarity');
+
+      return { chunk: item, score, reasons };
+    });
+  }
+
+  /**
+   * Synchronous retrieve using lexical, recency, and centrality (no vector search).
+   * Kept for backward compatibility.
+   */
+  private retrieveSync(input: RetrieveContextInput): RetrievalResult[] {
+    const limit = input.limit ?? 8;
+    const filteredChunks = Array.from(this.chunks.values()).filter((chunk) =>
+      this.matchesFilters(chunk, input.filters)
+    );
+
+    if (filteredChunks.length === 0) return [];
+
+    const lexicalResults = this.lexicalSearch(input.task, input.filters);
+    const recencyResults = this.recencyRank(filteredChunks);
+    const centralityResults = this.centralityRank(filteredChunks);
+
     const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults]);
     
     return combined.slice(0, limit).map(({ item, score }) => {
@@ -138,12 +165,71 @@ export class LocalRagService {
       if (recencyResults.slice(0, 10).includes(item)) reasons.push('recent file');
       if (centralityResults.slice(0, 10).includes(item)) reasons.push('structural centrality');
       
-      return {
-        chunk: item,
-        score,
-        reasons
-      };
+      return { chunk: item, score, reasons };
     });
+  }
+
+  private lexicalSearch(task: string, filters: RetrieveContextInput['filters']): RetrievalChunk[] {
+    const results: RetrievalChunk[] = [];
+    if (this.lunrIndex) {
+      try {
+        const hits = this.lunrIndex.search(task);
+        for (const hit of hits) {
+          const chunk = this.chunks.get(hit.ref);
+          if (chunk && this.matchesFilters(chunk, filters)) {
+            results.push(chunk);
+          }
+        }
+      } catch {
+        // lunr throws on certain query patterns — degrade gracefully
+      }
+    }
+    return results;
+  }
+
+  private recencyRank(chunks: RetrievalChunk[]): RetrievalChunk[] {
+    return [...chunks].sort((a, b) => {
+      const dateA = new Date(a.metadata.modifiedAt).getTime();
+      const dateB = new Date(b.metadata.modifiedAt).getTime();
+      return dateB - dateA;
+    });
+  }
+
+  private centralityRank(chunks: RetrievalChunk[]): RetrievalChunk[] {
+    return [...chunks].sort((a, b) => {
+      const scoreA = (a.metadata.owner === 'src' ? 10 : 0) + a.metadata.symbols.length;
+      const scoreB = (b.metadata.owner === 'src' ? 10 : 0) + b.metadata.symbols.length;
+      return scoreB - scoreA;
+    });
+  }
+
+  private async vectorSearch(
+    query: string,
+    filters: RetrieveContextInput['filters'],
+    limit: number
+  ): Promise<RetrievalChunk[]> {
+    try {
+      const vectorResults = await this.vectorStore.search(query, limit);
+      return vectorResults
+        .map((vr) => this.chunks.get(vr.id))
+        .filter((chunk): chunk is RetrievalChunk => chunk != null && this.matchesFilters(chunk, filters));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Sync all in-memory chunks to the LanceDB vector store.
+   */
+  private async syncVectorStore(): Promise<void> {
+    const allChunks = Array.from(this.chunks.values());
+    if (allChunks.length === 0) return;
+
+    try {
+      await this.vectorStore.upsert(allChunks);
+    } catch {
+      // Vector store sync failure is non-fatal — lexical search still works
+    }
   }
 
   getIndexedChunks(): RetrievalChunk[] {

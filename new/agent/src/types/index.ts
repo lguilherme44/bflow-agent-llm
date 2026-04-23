@@ -480,3 +480,69 @@ export interface ExecutionPlan {
   streams: ExecutionStream[];
   estimatedRisk: 'low' | 'medium' | 'high';
 }
+
+// ── Feedback Loop Types (Phase 6.3) ──────────────────────────
+
+export type StreamFailureKind =
+  | 'test_failure'
+  | 'build_failure'
+  | 'lint_failure'
+  | 'review_rejection'
+  | 'insufficient_quality'
+  | 'unknown';
+
+export interface FeedbackIteration {
+  iteration: number;
+  failureKind: StreamFailureKind;
+  delegatedTo: AgentRole;
+  streamId: string;
+  recoveryStreamId: string;
+  error: string;
+  resolvedAt?: string;
+  resolved: boolean;
+  tokensBefore: number;
+  tokensAfter?: number;
+}
+
+export interface FeedbackLoopPolicy {
+  maxRetries: number;
+  maxCostTokens: number;
+  enableAutoLintFix: boolean;
+}
+
+export interface FailurePattern {
+  kind: StreamFailureKind;
+  errorSignature: string;
+  count: number;
+  firstSeen: string;
+  lastSeen: string;
+  resolved: number;
+  total: number;
+}
+
+// ── Persona & Output Styles ───────────────────────────────────
+
+export type PersonaStyle = 'concise' | 'standard' | 'explainer' | 'tutor';
+
+// ── Hook System Types ─────────────────────────────────────────
+
+export type HookType = 'pre_tool' | 'post_tool';
+export type HookAction = 'block' | 'warn';
+
+export interface HookRule {
+  id: string;
+  name: string;
+  description: string;
+  type: HookType;
+  action: HookAction;
+  pattern: string; // Regex pattern
+  message: string;
+  toolFilter?: string[]; // Optional list of tools to apply this rule to
+}
+
+export interface HookEvaluation {
+  ruleId: string;
+  action: HookAction;
+  message: string;
+  triggered: boolean;
+}

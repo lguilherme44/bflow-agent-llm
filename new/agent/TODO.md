@@ -470,9 +470,9 @@ Pronto quando: o agente troca de provider sem mudar o loop principal.
 
 ### 3.2 Implementar RAG Interno do SaaS
 
-- [ ] Parcial: Escolher vector DB local:
-  - [ ] LanceDB
-  - [ ] ou Chroma
+- [x] Escolher vector DB local:
+  - [x] LanceDB (escolhido — embedded, in-process, zero infra, persistente em disco)
+  - [ ] ~~ou Chroma~~ (descartado — client-server, overkill para local-first)
   - [x] store vetorial local em memoria como fundacao substituivel
 - [x] Criar pipeline de indexacao da codebase:
   - [x] chunk por simbolo AST
@@ -498,7 +498,7 @@ Pronto quando: o agente troca de provider sem mudar o loop principal.
   - [x] recencia
 - [x] Implementar reranking explicavel.
 - [x] Criar tool `retrieveContext(task, filters)`.
-- [ ] Criar benchmark de retrieval com perguntas conhecidas.
+- [x] Criar benchmark de retrieval com perguntas conhecidas (83% hit@5).
 
 Pronto quando: o agente encontra arquivos relevantes antes de editar e explica por que escolheu cada um.
 
@@ -668,7 +668,7 @@ Pronto quando: da para ver onde o agente pensou, agiu, falhou, recuperou e gasto
   - [x] `del /s`
   - [x] `drop database`
   - [x] comandos com secrets inline
-- [ ] Sandbox Docker para execucao de codigo (Urgente: Risco real antes de staging).
+- [x] Sandbox Docker para execucao de codigo (DockerSandboxExecutor + NativeSandboxExecutor fallback).
 - [ ] Avaliar gVisor para isolamento mais forte.
 - [x] Restricted shell para ambientes sem Docker.
 - [x] Permitir apenas caminhos dentro do workspace.
@@ -741,14 +741,14 @@ Pronto quando: paralelizacao nao causa sobrescrita acidental nem mistura de cont
 
 ### 6.3 Implementar Feedback Loops
 
-- [ ] Se testes falham, Debug Agent investiga.
-- [ ] Se build quebra, Coder Agent corrige.
-- [ ] Se reviewer encontra bug, volta para Coder Agent.
-- [ ] Se lint falha, aplicar autofix ou pedir ajuste.
-- [ ] Maximo 3 iteracoes antes de escalar para humano.
-- [ ] Registrar cada iteracao no trace.
-- [ ] Guardar padroes de falha para melhorar prompts/tools (Mecanismo básico de feedback loop).
-- [ ] Encerrar cedo quando o custo ultrapassar limite.
+- [x] Se testes falham, Debug Agent investiga.
+- [x] Se build quebra, Coder Agent corrige.
+- [x] Se reviewer encontra bug, volta para Coder Agent.
+- [x] Se lint falha, aplicar autofix ou pedir ajuste.
+- [x] Maximo 3 iteracoes antes de escalar para humano.
+- [x] Registrar cada iteracao no trace.
+- [x] Guardar padroes de falha para melhorar prompts/tools (Mecanismo básico de feedback loop).
+- [x] Encerrar cedo quando o custo ultrapassar limite.
 
 Pronto quando: o agente melhora a propria saida dentro de limites claros.
 

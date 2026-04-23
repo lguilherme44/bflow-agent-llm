@@ -1,7 +1,7 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { redactSecrets } from '../llm/redaction.js';
-import { ToolResult } from '../types/index.js';
+import { ToolResult, FeedbackIteration } from '../types/index.js';
 
 export interface LogEntry {
   timestamp: string;
@@ -120,6 +120,24 @@ export class UnifiedLogger {
       action,
       filepath,
       details,
+    });
+  }
+
+  logFeedbackIteration(
+    agentId: string,
+    iteration: FeedbackIteration
+  ): void {
+    this.appendLog(agentId, 'event', {
+      event: 'feedback_loop_iteration',
+      iteration: iteration.iteration,
+      failureKind: iteration.failureKind,
+      delegatedTo: iteration.delegatedTo,
+      streamId: iteration.streamId,
+      recoveryStreamId: iteration.recoveryStreamId,
+      error: iteration.error.slice(0, 500),
+      resolved: iteration.resolved,
+      tokensBefore: iteration.tokensBefore,
+      tokensAfter: iteration.tokensAfter,
     });
   }
 }

@@ -13,10 +13,13 @@ export { TreeSitterParserService } from './code/tree-sitter-parser.js';
 export { AstGrepService } from './code/ast-grep-service.js';
 export { TypeScriptLanguageService } from './code/typescript-language-service.js';
 export { TerminalService } from './code/terminal-service.js';
+export { createSandbox, DockerSandboxExecutor, NativeSandboxExecutor, isDockerAvailable } from './code/sandbox-executor.js';
 export { createDevelopmentToolRegistry } from './tools/development-tools.js';
 export { ToolExecutor } from './tools/executor.js';
 export { ToolRegistry } from './tools/registry.js';
 export { createTool } from './tools/schema.js';
+export { LanceDBStore, TfIdfVectorizer } from './rag/lancedb-store.js';
+export { RankingUtils } from './rag/ranking-utils.js';
 export * from './types/index.js';
 
 import { ReActAgent } from './agent/react-loop.js';

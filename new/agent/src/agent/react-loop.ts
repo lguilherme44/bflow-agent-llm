@@ -5,6 +5,7 @@ import {
   JsonValue,
   LLMConfig,
   LLMResponse,
+  PersonaStyle,
   ToolCall,
   ToolResult,
 } from '../types/index.js';
@@ -16,6 +17,7 @@ import { CheckpointManager } from '../state/checkpoint.js';
 import { AgentStateMachine } from '../state/machine.js';
 import { ExecutorConfig, ToolExecutor, ToolExecutorHooks } from '../tools/executor.js';
 import { ToolRegistry } from '../tools/registry.js';
+import { HookService } from './hook-service.js';
 
 export interface ReActConfig {
   llm: LLMAdapter;
@@ -30,6 +32,8 @@ export interface ReActConfig {
   humanApprovalCallback?: (toolCall: ToolCall, reason: string) => Promise<boolean>;
   humanApprovalPolicy?: (toolCall: ToolCall, state: AgentState) => string | undefined;
   onUpdate?: (event: { type: string; role?: string; content?: string; message?: string; usage?: any }) => void;
+  hookService?: HookService;
+  personaStyle?: PersonaStyle;
 }
 
 export interface VerificationResult {
@@ -103,6 +107,62 @@ export class ReActAgent {
         });
         await userHooks?.onRollback?.(toolCall, rollbackResult);
       },
+      onPreExecute: async (toolCall) => {
+        if (!this.config.hookService) return undefined;
+        
+        const evaluations = this.config.hookService.evaluate('pre_tool', toolCall.toolName, toolCall.arguments);
+        const blocked = this.config.hookService.isBlocked(evaluations);
+        
+        if (blocked) {
+          return {
+            toolCallId: toolCall.id,
+            success: false,
+            data: null,
+            error: `Action blocked by rule "${blocked.ruleId}": ${blocked.message}`,
+            durationMs: 0,
+            timestamp: new Date().toISOString(),
+            attempts: 0,
+            timedOut: false,
+            recoverable: false,
+            errorCode: 'CRITICAL_ERROR'
+          };
+        }
+        
+        const warnings = evaluations.filter(e => e.action === 'warn');
+        for (const warn of warnings) {
+          this.config.onUpdate?.({ type: 'message_added', role: 'system', content: `⚠️ AVISO: Regra "${warn.ruleId}" disparada: ${warn.message}` });
+        }
+        
+        return undefined;
+      },
+      onPostExecute: async (toolCall, result) => {
+        if (!this.config.hookService || !result.success) return undefined;
+        
+        const evaluations = this.config.hookService.evaluate('post_tool', toolCall.toolName, result.data);
+        const blocked = this.config.hookService.isBlocked(evaluations);
+        
+        if (blocked) {
+          return {
+            toolCallId: toolCall.id,
+            success: false,
+            data: result.data, // Keep data for context
+            error: `Result blocked by rule "${blocked.ruleId}": ${blocked.message}`,
+            durationMs: result.durationMs,
+            timestamp: new Date().toISOString(),
+            attempts: result.attempts,
+            timedOut: false,
+            recoverable: false,
+            errorCode: 'CRITICAL_ERROR'
+          };
+        }
+        
+        const warnings = evaluations.filter(e => e.action === 'warn');
+        for (const warn of warnings) {
+          this.config.onUpdate?.({ type: 'message_added', role: 'system', content: `⚠️ AVISO (Pós-ação): Regra "${warn.ruleId}" disparada: ${warn.message}` });
+        }
+        
+        return undefined;
+      }
     };
   }
 
@@ -151,8 +211,21 @@ export class ReActAgent {
 
         const toolCalls = response.llmResponse.toolCalls ?? [];
         if (toolCalls.length === 0) {
-          state = AgentStateMachine.complete(state, response.llmResponse.content);
-          break;
+          // Instead of auto-completing, we warn the model that it must use a tool or complete_task.
+          // This prevents "lazy" models or conversational models from finishing prematurely.
+          state = AgentStateMachine.addMessage(state, {
+            role: 'system',
+            content: 'Você não forneceu nenhuma chamada de ferramenta. Use uma ferramenta para progredir ou use "complete_task" se o seu trabalho estiver concluído.',
+            timestamp: new Date().toISOString(),
+          });
+          
+          if (state.metadata.iterationCount >= (this.config.executorConfig?.maxIterations ?? 10)) {
+            state = AgentStateMachine.fail(state, 'Máximo de iterações atingido sem conclusão ou uso de ferramentas.');
+            break;
+          }
+          
+          await this.config.checkpointManager.checkpoint(state);
+          continue;
         }
 
         state = await this.act(state, toolCalls);
@@ -239,12 +312,17 @@ export class ReActAgent {
       }
       this.config.logger?.logLLMResponse(
         state.id,
-        this.config.llmConfig?.model ?? 'default', // Using model as provider placeholder if needed
+        this.config.llmConfig?.model ?? 'default',
         this.config.llmConfig?.model ?? 'default',
         llmResponse.usage,
-        undefined, // latency could be measured here
+        undefined,
         undefined
       );
+      
+      // Log event with full content for debugging
+      this.config.logger?.logEvent(state.id, 'llm_content_debug', { 
+        content: llmResponse.content.slice(0, 2000) 
+      });
     } catch (error) {
       if (llmSpan) {
         this.config.tracing?.recordLLMError(llmSpan, error instanceof Error ? error : new Error(String(error)));
@@ -505,8 +583,24 @@ export class ReActAgent {
       'Use complete_task when the task is done. If tool JSON is invalid, correct it on the next turn.',
       'Prefer AST-first code edits and request human approval for destructive, broad or sensitive actions.',
       this.config.registry.generateToolPrompt(),
+      this.buildPersonaPrompt(),
       '\nIMPORTANT: Always respond in the SAME LANGUAGE as the user\'s prompt. If the user asks in Portuguese, you MUST answer in Portuguese.',
     ].join('\n\n');
+  }
+
+  private buildPersonaPrompt(): string {
+    const style = this.config.personaStyle ?? 'standard';
+    switch (style) {
+      case 'concise':
+        return '### PERSONA: CONCISE\n- Be extremely brief.\n- Minimize explanations.\n- Focus only on technical execution and results.';
+      case 'explainer':
+        return '### PERSONA: EXPLAINER\n- Provide high-level summaries of your actions.\n- Explain the "what" and the "how" in a way that non-technical stakeholders can understand.\n- Use analogies if helpful.';
+      case 'tutor':
+        return '### PERSONA: TUTOR\n- Explain the reasoning behind your decisions.\n- Point out best practices and potential pitfalls.\n- Encourage learning by explaining technical concepts used in the code.';
+      case 'standard':
+      default:
+        return '### PERSONA: STANDARD\n- Be professional and helpful.\n- Provide clear thoughts and summaries of your work.';
+    }
   }
 
   private isTerminal(status: AgentStatus): boolean {

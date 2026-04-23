@@ -224,6 +224,29 @@ export class TracingService {
     return this.tracer.startSpan(`phase:${phaseName}`, options);
   }
 
+  startFeedbackLoopSpan(
+    streamId: string,
+    iteration: number,
+    failureKind: string,
+    parentSpan?: Span
+  ): Span {
+    const options = {
+      kind: SpanKind.INTERNAL,
+      attributes: {
+        'feedback_loop.stream_id': streamId,
+        'feedback_loop.iteration': iteration,
+        'feedback_loop.failure_kind': failureKind,
+        'component': 'feedback-loop',
+      },
+    };
+
+    const spanName = `feedback-loop:${failureKind}:${iteration}`;
+    if (parentSpan) {
+      return this.tracer.startSpan(spanName, options, this.getContext(parentSpan));
+    }
+    return this.tracer.startSpan(spanName, options);
+  }
+
   private getContext(span: Span) {
     return trace.setSpan(context.active(), span);
   }
