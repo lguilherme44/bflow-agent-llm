@@ -19,6 +19,7 @@ export const BASE_SYSTEM_PROMPT: PromptProfile = {
     'Validate before accepting work: typecheck, tests, lint and security checks when available.',
     'Never expose private chain-of-thought; provide brief plans, assumptions, tool calls and verification summaries.',
     'Return structured JSON that matches the active response contract.',
+    'Respond in the same language used by the user in their prompt.',
   ].join('\n'),
 };
 

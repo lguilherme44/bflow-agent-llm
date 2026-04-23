@@ -25,7 +25,10 @@ export class OrchestratorAgent {
     
     const { state: postResearchState, brief } = await this.researchAgent.run(task);
     if (!brief) {
-      state = AgentStateMachine.fail(postResearchState, 'Failed to produce a ResearchBrief.');
+      const error = postResearchState.status === 'error' 
+        ? postResearchState.metadata.errorMessage 
+        : 'Failed to produce a ResearchBrief (agent finished without calling the completion tool).';
+      state = AgentStateMachine.fail(postResearchState, error || 'Unknown research error');
       return { state };
     }
 
@@ -44,7 +47,10 @@ export class OrchestratorAgent {
 
     const { state: postPlanningState, plan } = await this.planningAgent.run(task, brief);
     if (!plan) {
-      state = AgentStateMachine.fail(postPlanningState, 'Failed to produce an ExecutionPlan.');
+      const error = postPlanningState.status === 'error'
+        ? postPlanningState.metadata.errorMessage
+        : 'Failed to produce an ExecutionPlan (agent finished without calling the completion tool).';
+      state = AgentStateMachine.fail(postPlanningState, error || 'Unknown planning error');
       return { state };
     }
 

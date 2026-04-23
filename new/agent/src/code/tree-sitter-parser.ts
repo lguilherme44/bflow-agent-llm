@@ -37,6 +37,30 @@ export class TreeSitterParserService {
       return cached.document;
     }
 
+    if (language === 'unknown') {
+      const document: CodeDocument = {
+        filepath,
+        language,
+        content,
+        contentHash,
+        parsedAt: new Date().toISOString(),
+        ast: {
+          id: '0',
+          kind: 'document',
+          range: {
+            start: { line: 1, column: 0, index: 0 },
+            end: { line: content.split(/\r?\n/).length, column: 0, index: content.length },
+          },
+        },
+        symbols: [],
+        imports: [],
+        exports: [],
+        diagnostics: [],
+      };
+      this.cache.set(cacheKey, { hash: contentHash, tree: null as any, document });
+      return document;
+    }
+
     const parser = this.getParser(language);
     const tree = parser.parse(content, cached?.tree);
     const rootNode = tree.rootNode;

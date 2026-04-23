@@ -2,7 +2,7 @@ export { ReActAgent } from './agent/react-loop';
 export { ContextManager } from './context/manager';
 export { MockLLMAdapter, OpenAIAdapter, LLMResponseParser } from './llm/adapter';
 export { LLMRouter, RouterLLMAdapter } from './llm/router';
-export { AnthropicProvider, MockLLMProvider, OpenAIProvider, OpenRouterProvider, providerFromEnv } from './llm/providers';
+export { AnthropicProvider, LMStudioProvider, MockLLMProvider, OllamaProvider, OpenAIProvider, OpenRouterProvider, providerFromEnv } from './llm/providers';
 export { redactMessages, redactSecrets } from './llm/redaction';
 export { PromptLibrary } from './prompts/library';
 export { LocalRagService } from './rag/local-rag';

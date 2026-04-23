@@ -444,6 +444,11 @@ export class ReActAgent {
     return [
       'You are a ReAct software engineering agent.',
       'Cycle contract: observe context, think with a short JSON action, act with tools, verify the result.',
+      'CRITICAL: You must ALWAYS respond with a JSON object. If you want to "think", include a "thought" field inside the JSON.',
+      'JSON Structure example:',
+      '```json',
+      '{ "thought": "Brief explanation", "tool": "tool_name", "arguments": { ... } }',
+      '```',
       'Use complete_task when the task is done. If tool JSON is invalid, correct it on the next turn.',
       'Prefer AST-first code edits and request human approval for destructive, broad or sensitive actions.',
       this.config.registry.generateToolPrompt(),

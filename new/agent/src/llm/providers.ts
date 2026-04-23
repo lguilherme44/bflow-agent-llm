@@ -113,7 +113,7 @@ export class OpenAIProvider extends BaseHttpProvider {
       model,
       temperature: request.config?.temperature ?? 0.2,
       max_tokens: request.config?.maxTokens,
-      response_format: { type: 'json_object' },
+      response_format: this.capabilities.jsonMode ? { type: 'json_object' } : undefined,
       messages: this.normalizeMessages(request.messages),
       tools: request.tools?.map((tool) => ({
         type: 'function',
@@ -222,6 +222,12 @@ export class LMStudioProvider extends OpenAIProvider {
     });
   }
 
+  readonly capabilities = {
+    streaming: true,
+    nativeToolCalling: false, // Local models often perform better with tools in prompt
+    jsonMode: false, // Avoid 400 errors in some local backends
+  };
+
   protected headers(): Record<string, string> {
     return {
       'Content-Type': 'application/json',
@@ -240,6 +246,12 @@ export class OllamaProvider extends OpenAIProvider {
       ...config,
     });
   }
+
+  readonly capabilities = {
+    streaming: true,
+    nativeToolCalling: false,
+    jsonMode: false,
+  };
 
   protected headers(): Record<string, string> {
     return {
