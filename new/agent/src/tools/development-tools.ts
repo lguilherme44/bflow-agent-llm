@@ -545,13 +545,17 @@ function packageArg(value: JsonValue | undefined): string {
 async function listFiles(workspaceRoot: string, directory: string, extensions?: string[]): Promise<string[]> {
   const root = assertInsideWorkspace(workspaceRoot, directory);
   const output: string[] = [];
-  const ignored = new Set(['node_modules', 'dist', '.git', '.agent-checkpoints']);
+  const ignored = new Set(['node_modules', 'dist', '.git', '.agent', '.agent-checkpoints', 'build', 'out']);
 
   async function walk(current: string): Promise<void> {
+    if (output.length > 500) return; // Limite de segurança para evitar flood de contexto
+
     const entries = await readdir(current, { withFileTypes: true });
     for (const entry of entries) {
-      if (ignored.has(entry.name)) {
-        continue;
+      if (ignored.has(entry.name) || entry.name.startsWith('.')) {
+        if (entry.name !== '.env' && entry.name !== '.gitignore') {
+          continue;
+        }
       }
 
       const fullPath = path.join(current, entry.name);
@@ -564,7 +568,7 @@ async function listFiles(workspaceRoot: string, directory: string, extensions?: 
   }
 
   await walk(root);
-  return output.sort();
+  return output.sort().slice(0, 500);
 }
 
 async function searchText(workspaceRoot: string, query: string, directory: string): Promise<Array<Record<string, JsonValue>>> {

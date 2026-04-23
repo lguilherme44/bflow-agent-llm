@@ -3,6 +3,7 @@ import { AgentState, ExecutionPlan } from '../types/index.js';
 import { ResearchAgent } from './research.js';
 import { PlanningAgent } from './planning.js';
 import { AgentStateMachine } from '../state/machine.js';
+import { ToolRegistry } from '../tools/registry.js';
 
 export type OrchestratorEvent = 
   | { type: 'phase_start'; phase: string }
@@ -18,6 +19,7 @@ export class OrchestratorAgent {
   private planningAgent: PlanningAgent;
   private totalUsage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
   private onUpdate?: OrchestratorUpdateCallback;
+  private liveConfig: ReActConfig;
 
   constructor(private config: ReActConfig) {
     const languageInstruction = "\n\nIMPORTANT: Always respond in the same language as the user's prompt. If the user speaks Portuguese, you MUST respond in Portuguese.";
@@ -27,21 +29,17 @@ export class OrchestratorAgent {
       systemPrompt: (this.config.llmConfig?.systemPrompt || '') + languageInstruction
     };
 
-    // Criamos uma configuração "viva" que repassa eventos para o Orchestrator
-    const liveConfig: ReActConfig = {
+    this.liveConfig = {
         ...this.config,
         onUpdate: (event) => {
-            if (event.usage) {
-                // Não acumulamos aqui para evitar duplicidade, o ReActAgent já acumula no estado
-            }
             if (event.type === 'message_added') {
                 this.notify({ type: 'message_added', role: event.role!, content: event.content! });
             }
         }
     };
 
-    this.researchAgent = new ResearchAgent(liveConfig);
-    this.planningAgent = new PlanningAgent(liveConfig);
+    this.researchAgent = new ResearchAgent(this.liveConfig);
+    this.planningAgent = new PlanningAgent(this.liveConfig);
   }
 
   public setUpdateCallback(callback: OrchestratorUpdateCallback) {
@@ -54,16 +52,69 @@ export class OrchestratorAgent {
   }
 
   private updateUsage(state: AgentState) {
-    // O ReActAgent já acumula os tokens no metadado do estado.
-    // Pegamos o valor absoluto do estado final de cada fase.
     this.totalUsage.totalTokens = state.metadata.totalTokensUsed || 0;
     this.notify({ type: 'usage_update', usage: this.totalUsage });
   }
 
   async run(task: string, existingState?: AgentState): Promise<{ state: AgentState; plan?: ExecutionPlan }> {
     let state = existingState ?? AgentStateMachine.create(`Orchestrate: ${task}`);
-    
-    // 1. Phase: Research
+
+    // --- ETAPA: CLASSIFICAÇÃO DE INTENÇÃO ---
+    const intentPrompt = `Analise a tarefa do usuário: "${task}"\nResponda apenas com uma palavra: "CHAT" se for uma saudação, conversa informal ou pergunta genérica. "TASK" se for um comando técnico, solicitação de código, análise de arquivos ou tarefa de engenharia.`;
+    const intentResponse = await this.config.llm.complete([{ 
+        role: 'system', 
+        content: 'Você é um classificador de intenções. Responda apenas "CHAT" ou "TASK".',
+        timestamp: new Date().toISOString()
+    }, { 
+        role: 'user', 
+        content: intentPrompt,
+        timestamp: new Date().toISOString()
+    }], { ...this.config.llmConfig, temperature: 0 });
+
+    const intent = intentResponse.content.trim().toUpperCase();
+
+    if (intent.includes('CHAT')) {
+        this.notify({ type: 'phase_start', phase: 'Chat' });
+        
+        // ECONOMIA DE TOKENS: Para Chat, não precisamos de todas as ferramentas de dev
+        const chatRegistry = new ToolRegistry();
+        // O ReActAgent precisa do complete_task para finalizar
+        chatRegistry.register(this.config.registry.get('complete_task')!);
+
+        const chatAgent = new ReActAgent({
+            ...this.liveConfig,
+            registry: chatRegistry, // Registry enxuto = prompt minúsculo
+            llmConfig: {
+                ...this.config.llmConfig,
+                systemPrompt: "Você é um assistente amigável. Responda à saudação do usuário em Português (PT-BR) de forma natural e depois use complete_task para encerrar a interação."
+            }
+        });
+
+        const chatState = await chatAgent.run(task);
+        this.totalUsage.totalTokens = chatState.metadata.totalTokensUsed || 0;
+        this.notify({ type: 'usage_update', usage: this.totalUsage });
+        
+        // Extrair e exibir a resposta final no quadro verde
+        const lastMsg = chatState.messages.filter(m => m.role === 'assistant').at(-1)?.content || '';
+        let summary = 'Olá! Como posso ajudar hoje?';
+        
+        try {
+            const clean = lastMsg.replace(/```json|```/g, '').trim();
+            if (clean.startsWith('{')) {
+                const parsed = JSON.parse(clean);
+                // Busca em várias profundidades para garantir que nada escape
+                summary = parsed.arguments?.summary || parsed.summary || parsed.final?.summary || parsed.thought || lastMsg;
+            }
+        } catch {
+            summary = lastMsg;
+        }
+
+        this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${summary}` });
+        this.notify({ type: 'phase_complete', phase: 'Finalized' });
+        return { state: chatState };
+    }
+
+    // --- FLUXO NORMAL DE TAREFA ---
     this.notify({ type: 'phase_start', phase: 'Research' });
     this.notify({ type: 'message_added', role: 'system', content: 'Iniciando fase de pesquisa...' });
     
@@ -74,9 +125,7 @@ export class OrchestratorAgent {
     this.updateUsage(postResearchState);
 
     if (!brief) {
-      const error = postResearchState.status === 'error' 
-        ? postResearchState.metadata.errorMessage 
-        : 'Falha ao gerar ResearchBrief.';
+      const error = postResearchState.status === 'error' ? postResearchState.metadata.errorMessage : 'Falha ao gerar ResearchBrief.';
       state = AgentStateMachine.fail(postResearchState, error || 'Erro desconhecido na pesquisa');
       this.notify({ type: 'error', message: error || 'Erro desconhecido na pesquisa' });
       return { state };
@@ -85,7 +134,6 @@ export class OrchestratorAgent {
     this.notify({ type: 'message_added', role: 'system', content: 'Pesquisa concluída com sucesso.' });
     this.notify({ type: 'phase_complete', phase: 'Research' });
 
-    // 2. Phase: Planning
     this.notify({ type: 'phase_start', phase: 'Planning' });
     this.notify({ type: 'message_added', role: 'system', content: 'Iniciando planejamento da tarefa...' });
 
@@ -93,16 +141,11 @@ export class OrchestratorAgent {
     const postPlanningState = planningResult.state;
     const plan = planningResult.plan;
 
-    // Acumulamos o uso do planejamento (que já inclui a pesquisa se o estado for o mesmo, 
-    // mas aqui o PlanningAgent cria seu próprio ReActAgent).
-    // Para simplificar o contador, vamos somar os totais de cada fase independente.
     this.totalUsage.totalTokens += postPlanningState.metadata.totalTokensUsed || 0;
     this.notify({ type: 'usage_update', usage: this.totalUsage });
 
     if (!plan) {
-      const error = postPlanningState.status === 'error'
-        ? postPlanningState.metadata.errorMessage
-        : 'Falha ao gerar ExecutionPlan.';
+      const error = postPlanningState.status === 'error' ? postPlanningState.metadata.errorMessage : 'Falha ao gerar ExecutionPlan.';
       state = AgentStateMachine.fail(postPlanningState, error || 'Erro desconhecido no planejamento');
       this.notify({ type: 'error', message: error || 'Erro desconhecido no planejamento' });
       return { state };
@@ -111,21 +154,14 @@ export class OrchestratorAgent {
     this.notify({ type: 'message_added', role: 'system', content: 'Plano de execução gerado.' });
     this.notify({ type: 'phase_complete', phase: 'Planning' });
 
-    // 3. Phase: Execution
     this.notify({ type: 'phase_start', phase: 'Execution' });
 
     for (const stream of plan.streams) {
       if (stream.status !== 'pending') continue;
-
       this.notify({ type: 'message_added', role: 'system', content: `Executando: ${stream.name}` });
 
       const workerAgent = new ReActAgent({
-        ...this.config,
-        onUpdate: (e) => {
-            if (e.type === 'message_added') {
-                this.notify({ type: 'message_added', role: e.role!, content: e.content! });
-            }
-        },
+        ...this.liveConfig,
         llmConfig: {
           ...this.config.llmConfig,
           systemPrompt: (this.config.llmConfig?.systemPrompt || '') + 
@@ -135,39 +171,31 @@ export class OrchestratorAgent {
             `\n\nREGRAS CRÍTICAS DE IDIOMA E SAÍDA:` +
             `\n1. VOCÊ DEVE FALAR EXCLUSIVAMENTE EM PORTUGUÊS (PT-BR).` +
             `\n2. TODOS OS SEUS PENSAMENTOS ('thought') E RESUMOS ('summary') DEVEM SER EM PORTUGUÊS.` +
-            `\n3. NÃO USE INGLÊS, MESMO QUE AS FERRAMENTAS RETORNEM TEXTO EM INGLÊS.` +
+            `\n3. NÃO USE INGLÊS, MESMO QUE AS FERRAMENTAS DEVEM RETORNAR TEXTO EM INGLÊS.` +
             `\n4. PARA FINALIZAR, USE A FERRAMENTA 'complete_task' E ESCREVA O RESUMO EM PORTUGUÊS.`
         }
       });
 
-      const streamTask = `Stream ${stream.id} tasks:\n- ${stream.tasks.join('\n- ')}`;
-      const workerState = await workerAgent.run(streamTask);
-      
+      const workerState = await workerAgent.run(`Stream ${stream.id} tasks:\n- ${stream.tasks.join('\n- ')}`);
       this.totalUsage.totalTokens += workerState.metadata.totalTokensUsed || 0;
       this.notify({ type: 'usage_update', usage: this.totalUsage });
 
       if (workerState.status === 'completed') {
         stream.status = 'completed';
-        
-        // 1. Tentar pegar da ferramenta complete_task
         const completeTaskResult = workerState.toolHistory.find(t => t.call.toolName === 'complete_task')?.result;
         let summary = (completeTaskResult as any)?.summary;
 
-        // 2. Se não achou na ferramenta, tentar extrair do JSON da última mensagem
         if (!summary) {
           const lastAssistantMsg = workerState.messages.filter(m => m.role === 'assistant').at(-1)?.content || '';
           try {
             const cleanJson = lastAssistantMsg.replace(/```json|```/g, '').trim();
             const parsed = JSON.parse(cleanJson);
-            // Procura em várias profundidades comuns que os modelos geram
             summary = parsed.arguments?.summary || parsed.summary || parsed.final?.summary || parsed.thought;
           } catch {
             summary = lastAssistantMsg.length > 20 ? lastAssistantMsg : null;
           }
         }
-
-        summary = summary || 'Tarefa finalizada sem resumo específico.';
-        this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${summary}` });
+        this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${summary || 'Finalizado.'}` });
       } else {
         stream.status = 'failed';
         this.notify({ type: 'error', message: `Falha na execução: ${workerState.metadata.errorMessage}` });
@@ -179,7 +207,6 @@ export class OrchestratorAgent {
     state = AgentStateMachine.complete(state, 'Orquestração finalizada com sucesso.');
     this.notify({ type: 'message_added', role: 'system', content: '=== TAREFA FINALIZADA ===' });
     this.notify({ type: 'phase_complete', phase: 'Finalized' });
-    
     return { state, plan };
   }
 }
