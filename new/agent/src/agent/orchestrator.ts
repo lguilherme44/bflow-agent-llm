@@ -128,7 +128,12 @@ export class OrchestratorAgent {
         },
         llmConfig: {
           ...this.config.llmConfig,
-          systemPrompt: this.config.llmConfig?.systemPrompt + `\n\nYou are a ${stream.owner} agent. Complete the task streams.`
+          systemPrompt: (this.config.llmConfig?.systemPrompt || '') + 
+            `\n\n### RESEARCH CONTEXT\n${JSON.stringify(brief, null, 2)}\n` +
+            `### EXECUTION PLAN\n${plan.summary}\n` +
+            `\n\nYou are a ${stream.owner} agent. Complete the task streams. ` +
+            `IMPORTANT: Always respond in Portuguese. To provide your final answer, you MUST use the 'complete_task' tool. ` +
+            `Do NOT use a tool named 'final'. Use only 'complete_task'.`
         }
       });
 
@@ -140,8 +145,11 @@ export class OrchestratorAgent {
 
       if (workerState.status === 'completed') {
         stream.status = 'completed';
-        const workerResponse = workerState.messages.filter(m => m.role === 'assistant').at(-1)?.content || 'Stream concluído.';
-        this.notify({ type: 'message_added', role: 'assistant', content: workerResponse });
+        // Buscamos o resumo da ferramenta complete_task para exibir na UI
+        const completeTaskResult = workerState.toolHistory.find(t => t.call.toolName === 'complete_task')?.result;
+        const summary = (completeTaskResult as any)?.summary || 'Stream concluído com sucesso.';
+        
+        this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${summary}` });
       } else {
         stream.status = 'failed';
         this.notify({ type: 'error', message: `Falha na execução: ${workerState.metadata.errorMessage}` });

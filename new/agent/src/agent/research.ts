@@ -10,9 +10,9 @@ export class ResearchAgent {
     // Clone registry to inject the specific completion tool
     const researchRegistry = new ToolRegistry();
     
-    // Copy all read-only tools from the original registry
-    const readOnlyTools = ['read_file', 'list_files', 'search_text', 'parse_file_ast', 'search_code', 'retrieve_context'];
-    for (const toolName of readOnlyTools) {
+    // Copy all read-only tools and complete_task from the original registry
+    const essentialTools = ['read_file', 'list_files', 'search_text', 'parse_file_ast', 'search_code', 'retrieve_context', 'complete_task'];
+    for (const toolName of essentialTools) {
       const tool = config.registry.get(toolName);
       if (tool) {
         researchRegistry.register(tool);

@@ -195,14 +195,14 @@ export class ContextManager {
 
   private compactOldMessages(messages: AgentMessage[], summary: StructuredSummary): AgentMessage[] {
     const systemMessages = messages.filter((message) => message.role === 'system').slice(0, 1);
-    const latestUserMessages = messages.filter((message) => message.role === 'user').slice(-2);
+    const latestUserMessages = messages.filter((message) => message.role === 'user').slice(-1);
     const recent = messages
       .filter((message) => message.role !== 'system' && message.role !== 'user')
-      .slice(-this.config.summarizeThreshold);
+      .slice(-12);
 
     const summaryMessage: AgentMessage = {
       role: 'system',
-      content: `Structured context summary:\n${JSON.stringify(summary, null, 2)}`,
+      content: `Context Summary:\n- Task: ${summary.currentTask}\n- Files: ${summary.relevantFiles.slice(0, 5).join(', ')}\n- Last Progress: ${summary.progress.slice(-3).join(', ')}`,
       timestamp: new Date().toISOString(),
     };
 
@@ -215,7 +215,7 @@ export class ContextManager {
         return message;
       }
 
-      const isRecent = index >= messages.length - 10;
+      const isRecent = index >= messages.length - 4;
       const isError = !message.toolResult.success;
       if (isRecent || isError) {
         return message;
@@ -223,7 +223,7 @@ export class ContextManager {
 
       return {
         ...message,
-        content: '[Earlier successful tool result compacted. Full result remains in toolHistory checkpoint.]',
+        content: `[Tool ${message.toolResult.toolCallId} result omitted]`,
       };
     });
   }
@@ -235,11 +235,10 @@ export class ContextManager {
     systemPrompt?: string
   ): AgentMessage[] {
     const basePrompt = [
-      systemPrompt ?? 'You are a checkpointable ReAct software engineering agent.',
-      'Preserve task goals, decisions, constraints, errors, touched files and human approvals.',
+      systemPrompt ?? 'You are a ReAct agent.',
       `Current task: ${state.currentTask ?? 'none'}`,
-      `Context summary: ${JSON.stringify(summary)}`,
-    ].join('\n');
+      summary.relevantFiles.length > 0 ? `Relevant files: ${summary.relevantFiles.slice(0, 3).join(', ')}` : '',
+    ].filter(Boolean).join('\n');
 
     const nonSystem = messages.filter((message) => message.role !== 'system');
     return [

@@ -34,7 +34,13 @@ async function main() {
   const workspaceRoot = process.cwd();
   const registry = createDevelopmentToolRegistry({ workspaceRoot });
   const checkpointManager = new CheckpointManager(new FileCheckpointStorage(path.join(workspaceRoot, '.agent', 'checkpoints')));
-  const contextManager = new ContextManager();
+  
+  // Configuramos o ContextManager para ser amigável a modelos locais (limite de 3000 tokens)
+  const contextManager = new ContextManager({
+    maxTokensEstimate: 3000,
+    summarizeThreshold: 20
+  });
+
   const logger = new UnifiedLogger({ logDirectory: path.join(workspaceRoot, '.agent', 'logs') });
 
   const provider = process.env.OPENAI_API_KEY ? providerFromEnv('openai') : new LMStudioProvider();

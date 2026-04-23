@@ -10,8 +10,8 @@ export class PlanningAgent {
     const planningRegistry = new ToolRegistry();
     
     // Planner shouldn't execute edits, only read context and plan
-    const readOnlyTools = ['read_file', 'list_files', 'search_text', 'search_code', 'retrieve_context'];
-    for (const toolName of readOnlyTools) {
+    const essentialTools = ['read_file', 'list_files', 'search_text', 'search_code', 'retrieve_context', 'complete_task'];
+    for (const toolName of essentialTools) {
       const tool = config.registry.get(toolName);
       if (tool) {
         planningRegistry.register(tool);
