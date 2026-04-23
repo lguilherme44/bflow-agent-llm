@@ -24,8 +24,16 @@ export class LLMResponseParser {
       const parsed = JSON.parse(jsonText) as Record<string, unknown>;
       const toolCalls = this.parseToolCallList(parsed);
       const finalResponse = this.parseFinal(parsed);
-      const thought = typeof parsed.thought === 'string' ? parsed.thought : content;
-      return { thought, toolCalls, finalResponse };
+      
+      let thought = typeof parsed.thought === 'string' ? parsed.thought : content;
+      // Limpa as tags especiais do pensamento para exibição na UI
+      thought = thought
+        .replace(/<\|channel\|>[\s\S]*?<\|message\|>/gi, '')
+        .replace(/<\|constrain\|>[\s\S]*?(?=<|$)/gi, '')
+        .replace(/<\|[\s\S]*?\|>/gi, '')
+        .trim();
+
+      return { thought: thought || 'Processando...', toolCalls, finalResponse };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       return {
@@ -47,7 +55,21 @@ export class LLMResponseParser {
       return fenced[1];
     }
 
-    // Suporte para o formato <|message|>{"key":"value"}
+    // Suporte para o formato <|channel|> (commentary) to=tool_name <|constrain|>json <|message|>{"key":"value"}
+    // Extraímos o nome da ferramenta do atributo 'to' e injetamos no JSON se necessário.
+    const channelMatch = content.match(/<\|channel\|>[\s\S]*?to=([a-zA-Z0-9_-]+)[\s\S]*?<\|message\|>\s*(\{[\s\S]*\})/i);
+    if (channelMatch) {
+      const toolName = channelMatch[1];
+      const argsJson = channelMatch[2];
+      try {
+        const args = JSON.parse(argsJson);
+        return JSON.stringify({ tool: toolName, arguments: args });
+      } catch {
+        return argsJson; // Deixa o parse principal tratar o erro de JSON
+      }
+    }
+
+    // Suporte para o formato simplificado <|message|>{"key":"value"}
     const messageTag = content.match(/<\|message\|>\s*([\s\S]*)/i);
     const contentToSearch = messageTag?.[1] ?? content;
 

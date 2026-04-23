@@ -73,7 +73,15 @@ export class ResearchAgent {
           `\nREGRAS CRÍTICAS:` +
           `\n1. FALE APENAS EM PORTUGUÊS (PT-BR).` +
           `\n2. Use a ferramenta 'submit_research_brief' para finalizar sua fase. VOCÊ SÓ PODE TERMINAR USANDO ESTA FERRAMENTA.` +
-          `\n3. USE SEMPRE OS CAMINHOS EXATOS RETORNADOS PELAS FERRAMENTAS. NÃO ADICIONE NEM REMOVA PREFIXOS DE DIRETÓRIO.`
+          `\n3. USE SEMPRE OS CAMINHOS EXATOS RETORNADOS PELAS FERRAMENTAS. NÃO ADICIONE NEM REMOVA PREFIXOS DE DIRETÓRIO.` +
+          `\n4. COMECE SEMPRE por 'list_files' ou 'git_status' para descobrir a estrutura do projeto.` +
+          `\n5. SÓ USE 'search_text' DEPOIS de ter um termo concreto para buscar. O campo 'query' NUNCA pode ser vazio.` +
+          `\n6. Se não souber o que pesquisar, leia um arquivo relevante (ex: README.md, package.json, TODO.md) com 'read_file'.` +
+          `\n\nESTRATÉGIA DE PESQUISA RECOMENDADA:` +
+          `\n- Passo 1: list_files para ver a estrutura do projeto` +
+          `\n- Passo 2: read_file em arquivos-chave (README, package.json, etc.)` +
+          `\n- Passo 3: search_text com termos específicos quando necessário` +
+          `\n- Passo 4: submit_research_brief com suas conclusões`
       }
     });
   }

@@ -15,6 +15,7 @@ import { RiskEvaluation } from '../utils/risk-engine.js';
 interface AppProps {
   orchestrator: OrchestratorAgent;
   initialTask?: string;
+  initialState?: any; // AgentState
 }
 
 interface DisplayMessage {
@@ -241,7 +242,7 @@ const ActivityRow = memo(({ message, width }: { message: DisplayMessage; width: 
 
 ActivityRow.displayName = 'ActivityRow';
 
-export const App = ({ orchestrator, initialTask = '' }: AppProps) => {
+export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) => {
   const { stdout } = useStdout();
   const { exit } = useApp();
 
@@ -250,17 +251,32 @@ export const App = ({ orchestrator, initialTask = '' }: AppProps) => {
     rows: stdout?.rows || 30,
   });
   const [query, setQuery] = useState('');
-  const [activeTask, setActiveTask] = useState(initialTask.trim());
+  const [activeTask, setActiveTask] = useState(initialState?.currentTask || initialTask.trim());
   const [isRunning, setIsRunning] = useState(false);
-  const [status, setStatus] = useState<AppStatus>('idle');
-  const [messages, setMessages] = useState<DisplayMessage[]>([]);
+  const [status, setStatus] = useState<AppStatus>(
+    initialState?.status === 'completed' ? 'completed' : 
+    initialState?.status === 'error' ? 'error' : 
+    'idle'
+  );
+  
+  const [messages, setMessages] = useState<DisplayMessage[]>(() => {
+    if (!initialState) return [];
+    return initialState.messages
+      .filter((m: any) => m.role !== 'system')
+      .map((m: any) => ({
+        role: m.role,
+        content: formatContent(m.content),
+        timestamp: m.timestamp?.split('T')[1]?.slice(0, 5) || nowLabel()
+      }));
+  });
+
   const [currentPhase, setCurrentPhase] = useState('Ready');
   const [completedPhases, setCompletedPhases] = useState<string[]>([]);
-  const [usage, setUsage] = useState({ totalTokens: 0 });
-  const [error, setError] = useState<string | null>(null);
+  const [usage, setUsage] = useState({ totalTokens: initialState?.metadata?.totalTokensUsed || 0 });
+  const [error, setError] = useState<string | null>(initialState?.metadata?.errorMessage || null);
   const [finalResult, setFinalResult] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
-  const [lastEventAt, setLastEventAt] = useState<string | null>(null);
+  const [lastEventAt, setLastEventAt] = useState<string | null>(initialState ? nowLabel() : null);
   const [hasAutoStarted, setHasAutoStarted] = useState(false);
 
   const deferredMessages = useDeferredValue(messages);
@@ -297,7 +313,7 @@ export const App = ({ orchestrator, initialTask = '' }: AppProps) => {
     };
   }, [stdout]);
 
-  const submitTask = useEffectEvent(async (task: string) => {
+  const submitTask = useEffectEvent(async (task: string, state?: any) => {
     const normalizedTask = compactWhitespace(task);
     if (!normalizedTask || isRunning) {
       return;
@@ -305,26 +321,31 @@ export const App = ({ orchestrator, initialTask = '' }: AppProps) => {
 
     const timestamp = nowLabel();
 
-    setActiveTask(normalizedTask);
-    setIsRunning(true);
-    setStatus('running');
+    if (!state) {
+      setActiveTask(normalizedTask);
+      setStatus('running');
+      setCompletedPhases([]);
+      setMessages((previous) =>
+        appendMessage(previous, {
+          role: 'user',
+          content: normalizedTask,
+          timestamp,
+        })
+      );
+    } else {
+      setIsRunning(true);
+      setStatus('running');
+    }
+
     setCurrentPhase('Preparing');
-    setCompletedPhases([]);
     setQuery('');
     setFinalResult(null);
     setError(null);
     setPendingApproval(null);
     setLastEventAt(timestamp);
-    setMessages((previous) =>
-      appendMessage(previous, {
-        role: 'user',
-        content: normalizedTask,
-        timestamp,
-      })
-    );
 
     try {
-      await orchestrator.run(normalizedTask);
+      await orchestrator.run(normalizedTask, state);
     } catch (submissionError) {
       setStatus('error');
       setError(submissionError instanceof Error ? submissionError.message : String(submissionError));
@@ -400,10 +421,12 @@ export const App = ({ orchestrator, initialTask = '' }: AppProps) => {
     }
 
     setHasAutoStarted(true);
-    if (initialTask.trim()) {
+    if (initialState) {
+      void submitTask(initialState.currentTask || initialTask, initialState);
+    } else if (initialTask.trim()) {
       void submitTask(initialTask);
     }
-  }, [hasAutoStarted, initialTask]);
+  }, [hasAutoStarted, initialTask, initialState]);
 
   useInput((input, key) => {
     if (key.ctrl && input === 'c') {

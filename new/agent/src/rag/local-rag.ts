@@ -58,10 +58,15 @@ export class LocalRagService {
     let skippedFiles = 0;
 
     for (const filepath of files) {
-      const changed = await this.indexFile(filepath);
-      if (changed) {
-        filesIndexed += 1;
-      } else {
+      try {
+        const changed = await this.indexFile(filepath);
+        if (changed) {
+          filesIndexed += 1;
+        } else {
+          skippedFiles += 1;
+        }
+      } catch {
+        // Individual file indexing failure is non-fatal — skip and continue
         skippedFiles += 1;
       }
     }
@@ -249,7 +254,27 @@ export class LocalRagService {
       return [];
     }
 
-    const document = this.parser.parseText(filepath, content);
+    let document;
+    try {
+      document = this.parser.parseText(filepath, content);
+    } catch {
+      // Tree-sitter can crash on certain files (e.g. very large or binary-like content).
+      // Fall back to a raw text chunk so indexing continues.
+      return [
+        this.makeChunk(filepath, content.slice(0, 8_000), contentHash, {
+          filepath,
+          language,
+          symbols: [],
+          imports: [],
+          exports: [],
+          modifiedAt,
+          owner: ownerFromPath(filepath),
+          module: moduleFromPath(this.workspaceRoot, filepath),
+          chunkKind: 'file',
+        }),
+      ];
+    }
+
     const symbolChunks = document.symbols
       .filter((symbol) => this.isChunkableSymbol(symbol))
       .slice(0, 200)
@@ -352,7 +377,7 @@ export class LocalRagService {
 
   private async listIndexableFiles(directory: string): Promise<string[]> {
     const output: string[] = [];
-    const ignored = new Set(['node_modules', 'dist', '.git', '.agent-checkpoints', '.checkpoints']);
+    const ignored = new Set(['node_modules', 'dist', '.git', '.agent', '.agent-checkpoints', '.checkpoints', 'build', 'out']);
 
     async function walk(current: string): Promise<void> {
       const entries = await readdir(current, { withFileTypes: true });

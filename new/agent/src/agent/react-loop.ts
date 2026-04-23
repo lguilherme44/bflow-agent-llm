@@ -19,6 +19,8 @@ import { ExecutorConfig, ToolExecutor, ToolExecutorHooks } from '../tools/execut
 import { ToolRegistry } from '../tools/registry.js';
 import { HookService } from './hook-service.js';
 
+import { SandboxMode } from '../code/sandbox-executor.js';
+
 export interface ReActConfig {
   llm: LLMAdapter;
   registry: ToolRegistry;
@@ -34,6 +36,7 @@ export interface ReActConfig {
   onUpdate?: (event: { type: string; role?: string; content?: string; message?: string; usage?: any }) => void;
   hookService?: HookService;
   personaStyle?: PersonaStyle;
+  sandboxMode?: SandboxMode;
 }
 
 export interface VerificationResult {
@@ -215,7 +218,7 @@ export class ReActAgent {
           // This prevents "lazy" models or conversational models from finishing prematurely.
           state = AgentStateMachine.addMessage(state, {
             role: 'system',
-            content: 'Você não forneceu nenhuma chamada de ferramenta. Use uma ferramenta para progredir ou use "complete_task" se o seu trabalho estiver concluído.',
+            content: 'Você não forneceu nenhuma chamada de ferramenta estruturada em JSON. Relembre o contrato: { "thought": "sua explicação", "tool": "nome_da_ferramenta", "arguments": { ... } }. Use uma ferramenta para progredir ou "complete_task" se terminou.',
             timestamp: new Date().toISOString(),
           });
           
@@ -400,6 +403,29 @@ export class ReActAgent {
         terminal: true,
         state: AgentStateMachine.fail(state, 'Repeated identical tool calls detected'),
       };
+    }
+
+    // Detect failure loops (e.g. the LLM keeps sending empty query to search_text)
+    const failureLoop = AgentStateMachine.detectFailureLoop(state);
+    if (failureLoop) {
+      const lastFailed = state.toolHistory.at(-1);
+      const toolName = lastFailed?.call.toolName ?? 'unknown';
+      const failedArgs = JSON.stringify(lastFailed?.call.arguments ?? {});
+      const correctionMessage =
+        `ERRO REPETIDO DETECTADO: Você chamou a ferramenta "${toolName}" múltiplas vezes com os mesmos argumentos inválidos: ${failedArgs}. ` +
+        `Erro: ${failureLoop}. ` +
+        `VOCÊ DEVE ALTERAR SUA ABORDAGEM. Opções:` +
+        `\n1. Use argumentos DIFERENTES e VÁLIDOS (ex: query não pode ser vazio).` +
+        `\n2. Use uma ferramenta DIFERENTE (ex: list_files, read_file, git_status).` +
+        `\n3. Se não tem informação suficiente, use 'complete_task' com status 'failure' e explique o problema.` +
+        `\nNÃO repita a mesma chamada com os mesmos argumentos.`;
+
+      const next = AgentStateMachine.addMessage(state, {
+        role: 'system',
+        content: correctionMessage,
+        timestamp: new Date().toISOString(),
+      });
+      return { terminal: false, state: next };
     }
 
     const lastExecution = state.toolHistory.at(-1);

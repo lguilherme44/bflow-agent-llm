@@ -34,6 +34,14 @@ function resolveProviderName(args: string[]): ProviderName {
   throw new Error(`Provider invalido: ${providerName}. Use openai, anthropic, openrouter, lmstudio ou ollama.`);
 }
 
+function resolveSandboxMode(args: string[]): any {
+  const rawSandbox = args.find((arg) => arg.startsWith('--sandbox='))?.split('=')[1];
+  if (rawSandbox && ['docker', 'native', 'auto'].includes(rawSandbox)) {
+    return rawSandbox;
+  }
+  return 'auto';
+}
+
 function resolveProvider(providerName: ProviderName) {
   if (providerName === 'lmstudio') {
     return new LMStudioProvider();
@@ -50,12 +58,45 @@ async function main() {
   const args = process.argv.slice(2);
   const providerName = resolveProviderName(args);
   const positionalArgs = args.filter((arg) => !arg.startsWith('--'));
+  const command = positionalArgs[0];
   
   let workspaceRoot = process.cwd();
-  let initialTask = positionalArgs.join(' ').trim() || 'Explore the codebase';
+  const checkpointStorage = new FileCheckpointStorage(path.join(workspaceRoot, '.agent', 'checkpoints'));
+  const checkpointManager = new CheckpointManager(checkpointStorage);
 
-  // If the first positional argument is a valid directory, use it as workspaceRoot
-  if (positionalArgs.length > 0) {
+  // COMMAND: LIST
+  if (command === 'list') {
+    const checkpoints = await checkpointManager.list();
+    if (checkpoints.length === 0) {
+      console.log('Nenhuma sessao encontrada.');
+      return;
+    }
+    console.log('\n--- SESSOES DO AGENTE ---');
+    checkpoints.forEach((cp) => {
+      const date = new Date(cp.updatedAt).toLocaleString('pt-BR');
+      console.log(`[${cp.id}] ${cp.status.padEnd(10)} | ${date} | ${cp.currentTask?.slice(0, 50)}...`);
+    });
+    return;
+  }
+
+  let initialTask = positionalArgs.join(' ').trim() || 'Explore the codebase';
+  let initialState: any = undefined;
+
+  // COMMAND: RESUME
+  if (command === 'resume') {
+    const resumeId = positionalArgs[1];
+    if (!resumeId) {
+      console.error('Erro: Forneca o ID da sessao para retomar.');
+      process.exit(1);
+    }
+    initialState = await checkpointManager.resumeFromCheckpoint(resumeId);
+    if (!initialState) {
+      console.error(`Erro: Sessao ${resumeId} nao encontrada.`);
+      process.exit(1);
+    }
+    initialTask = initialState.currentTask || 'Explore the codebase';
+  } else if (positionalArgs.length > 0) {
+    // If the first positional argument is a valid directory, use it as workspaceRoot
     const candidatePath = path.resolve(process.cwd(), positionalArgs[0]);
     if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isDirectory()) {
       workspaceRoot = candidatePath;
@@ -64,9 +105,6 @@ async function main() {
   }
 
   const registry = createDevelopmentToolRegistry({ workspaceRoot });
-  const checkpointManager = new CheckpointManager(
-    new FileCheckpointStorage(path.join(workspaceRoot, '.agent', 'checkpoints'))
-  );
   const contextManager = new ContextManager({
     maxTokensEstimate: 3000,
     summarizeThreshold: 20,
@@ -88,7 +126,7 @@ async function main() {
     checkpointManager,
     contextManager,
     logger,
-    // The orchestrator replaces this callback with the interactive visual approval flow.
+    sandboxMode: resolveSandboxMode(args),
     humanApprovalCallback: async () => true,
     llmConfig: {
       model: provider.defaultModel,
@@ -97,7 +135,7 @@ async function main() {
   });
 
   const { waitUntilExit } = render(
-    <App orchestrator={orchestrator} initialTask={initialTask} />
+    <App orchestrator={orchestrator} initialTask={initialTask} initialState={initialState} />
   );
 
   await waitUntilExit();

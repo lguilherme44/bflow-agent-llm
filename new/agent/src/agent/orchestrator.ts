@@ -59,7 +59,7 @@ export class OrchestratorAgent {
     this.feedbackLoop = new FeedbackLoopEngine(feedbackPolicy);
     this.fallbackHumanApprovalCallback = this.config.humanApprovalCallback;
     this.hookService = new HookService(this.workspaceRoot);
-    const terminal = new TerminalService(this.workspaceRoot);
+    const terminal = new TerminalService(this.workspaceRoot, { sandboxMode: this.config.sandboxMode });
     this.workspaceManager = new WorkspaceManager(this.workspaceRoot, terminal);
     this.liveConfig = {
         ...this.config,

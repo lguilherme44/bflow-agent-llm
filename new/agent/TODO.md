@@ -469,10 +469,8 @@ Pronto quando: comandos sao executados de forma rastreavel, limitada e recuperav
 Pronto quando: o agente troca de provider sem mudar o loop principal.
 
 ### 3.2 Implementar RAG Interno do SaaS
-
 - [x] Escolher vector DB local:
   - [x] LanceDB (escolhido — embedded, in-process, zero infra, persistente em disco)
-  - [ ] ~~ou Chroma~~ (descartado — client-server, overkill para local-first)
   - [x] store vetorial local em memoria como fundacao substituivel
 - [x] Criar pipeline de indexacao da codebase:
   - [x] chunk por simbolo AST
@@ -490,14 +488,14 @@ Pronto quando: o agente troca de provider sem mudar o loop principal.
 - [x] Implementar reindex incremental por hash.
 - [x] Indexar documentacao interna.
 - [x] Indexar ADRs e padroes de codigo.
-- [ ] Integrar Context7 para docs versionadas de dependencias.
+- [x] Unicode-aware tokenization (UTF-8) para suporte robusto a Português.
 - [x] Implementar retrieval hibrido:
-  - [x] vetor
-  - [x] lexical
+  - [x] vetor (LanceDB)
+  - [x] lexical (Lunr/BM25)
   - [x] structural/AST
   - [x] recencia
-- [x] Implementar reranking explicavel.
-- [x] Criar tool `retrieveContext(task, filters)`.
+- [x] Implementar reranking explicavel (RRF).
+- [x] Criar tool `retrieve_context(task, filters)`.
 - [x] Criar benchmark de retrieval com perguntas conhecidas (83% hit@5).
 
 Pronto quando: o agente encontra arquivos relevantes antes de editar e explica por que escolheu cada um.
@@ -1084,7 +1082,10 @@ Objetivo: transformar o agente em uma ferramenta de linha de comando de primeira
 
 ### 9.4 Gestão de Sessões e Persistência
 
-- [ ] `agent list`: listar tarefas recentes e seus status.
+- [x] `agent list`: listar tarefas recentes e seus status.
+- [x] `agent resume <id>`: retomar uma tarefa interrompida ou finalizada.
+- [x] Persistência de histórico de mensagens e estado do orquestrador.
+- [x] UI visual (TUI) suporta carregamento de estado inicial.
 - [ ] `agent resume <task-id>`: retomar uma tarefa interrompida ou em estado de erro.
 - [ ] `agent status`: ver o que o agente está fazendo no momento (se rodando em background).
 - [ ] Exportação de logs/traces simplificada para depuração humana.

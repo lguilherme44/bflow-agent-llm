@@ -107,7 +107,35 @@ export class FileCheckpointStorage implements CheckpointStorage {
     };
 
     await writeFile(tempPath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
-    await rename(tempPath, filepath);
+    
+    // Windows can be finicky with renames if a file is being scanned or indexed.
+    // We use a retry loop to handle transient EPERM/EBUSY errors.
+    let lastError: any;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        await rename(tempPath, filepath);
+        return;
+      } catch (error) {
+        lastError = error;
+        const isTransient = typeof error === 'object' && error !== null && 'code' in error && 
+          (error.code === 'EPERM' || error.code === 'EBUSY');
+        
+        if (!isTransient || attempt === 4) {
+          break;
+        }
+        
+        // Wait and retry
+        await new Promise(resolve => setTimeout(resolve, 50 * (attempt + 1)));
+      }
+    }
+
+    // Fallback: if rename still fails, try copy + unlink
+    try {
+      await writeFile(filepath, `${JSON.stringify(envelope, null, 2)}\n`, 'utf8');
+      await rm(tempPath, { force: true });
+    } catch (error) {
+      throw lastError || error;
+    }
   }
 
   async load(id: string): Promise<AgentState | null> {

@@ -284,7 +284,44 @@ export class AgentStateMachine {
     }
 
     const calls = recent.map((entry) => `${entry.call.toolName}:${JSON.stringify(entry.call.arguments)}`);
-    return new Set(calls).size === 1;
+    if (new Set(calls).size !== 1) {
+      return false;
+    }
+
+    // If ALL repeated calls are failures (e.g. validation errors), 
+    // the model needs better guidance, not a hard stop.
+    const allFailed = recent.every((entry) => !entry.result.success);
+    if (allFailed) {
+      return false;
+    }
+
+    // Truly stuck: same call repeated and at least some succeeded
+    return true;
+  }
+
+  /**
+   * Detects when the agent is in a failure loop — repeating the same
+   * failing tool call without making progress. Returns the repeated
+   * error message if detected, or null otherwise.
+   */
+  static detectFailureLoop(state: AgentState, windowSize = 3): string | null {
+    const recent = state.toolHistory.slice(-windowSize);
+    if (recent.length < windowSize) {
+      return null;
+    }
+
+    const allFailed = recent.every((entry) => !entry.result.success);
+    if (!allFailed) {
+      return null;
+    }
+
+    const calls = recent.map((entry) => `${entry.call.toolName}:${JSON.stringify(entry.call.arguments)}`);
+    if (new Set(calls).size === 1) {
+      const lastError = recent.at(-1)?.result.error ?? 'Unknown error';
+      return `Tool "${recent[0].call.toolName}" has failed ${windowSize} times consecutively with the same arguments. Last error: ${lastError}`;
+    }
+
+    return null;
   }
 
   private static updateState(state: AgentState, partial: Partial<AgentState>): AgentState {
