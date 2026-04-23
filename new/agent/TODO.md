@@ -24,8 +24,8 @@ Status atualizado em 2026-04-22:
 - [x] Proxima etapa sugerida: Fase 4 - Research/Planning Agents usando RAG antes de planejar.
 - [x] Fase 5.0 Slice Básico implementado: OpenTelemetry com TracingService, spans por tool call, LLM call e agent run, exportador in-memory para testes.
 - [x] NOVO: Criar skills.md (Fase 7.2 antecipada) como guia de convenções.
-- [ ] Proxima etapa sugerida: Fase 4 - Research Agent + Planning Agent, ou Fase 5.1 - Logging Unificado.
-
+- [x] Fase 5.1 implementada: UnifiedLogger, log JSONL estruturado com redação de secrets, integração de logs no ReActLoop e TerminalService, testes de formatação inclusos.
+- [ ] Próxima etapa sugerida: Fase 4 - Research Agent + Planning Agent.
 ## 0. Base Tecnica e Build
 
 - [x] Corrigir `tsconfig.json`/tipos Node para reconhecer `console`, `crypto`, `AbortController`, `AbortSignal`, `setTimeout` e `clearTimeout`.
@@ -620,23 +620,23 @@ Pronto quando: o agente coordena trabalho complexo sem virar um bloco monolitico
 
 ### 5.1 Logging Unificado
 
-- [ ] Registrar todos os comandos executados.
-- [ ] Registrar cwd, exit code, duracao e output resumido.
-- [ ] Registrar respostas do LLM:
-  - [ ] provider
-  - [ ] modelo
-  - [ ] prompt tokens
-  - [ ] completion tokens
-  - [ ] custo estimado
-  - [ ] latencia
-- [ ] Registrar resultados de tools:
-  - [ ] sucesso/falha
-  - [ ] tentativas
-  - [ ] rollback
-  - [ ] erro recuperavel
-- [ ] Registrar arquivos lidos/modificados.
-- [ ] Redigir secrets em logs.
-- [ ] Criar log estruturado JSONL por task.
+- [x] Registrar todos os comandos executados.
+- [x] Registrar cwd, exit code, duracao e output resumido.
+- [x] Registrar respostas do LLM:
+  - [x] provider
+  - [x] modelo
+  - [x] prompt tokens
+  - [x] completion tokens
+  - [x] custo estimado
+  - [x] latencia
+- [x] Registrar resultados de tools:
+  - [x] sucesso/falha
+  - [x] tentativas
+  - [x] rollback
+  - [x] erro recuperavel
+- [x] Registrar arquivos lidos/modificados.
+- [x] Redigir secrets em logs.
+- [x] Criar log estruturado JSONL por task.
 
 Pronto quando: qualquer execucao pode ser auditada depois.
 

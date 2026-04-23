@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { assertInsideWorkspace } from './source';
+import { UnifiedLogger } from '../observability/logger';
 
 export interface CommandResult {
   command: string;
@@ -16,6 +17,8 @@ export interface TerminalServiceConfig {
   outputLimit: number;
   allowedCommands: string[];
   deniedPatterns: RegExp[];
+  logger?: UnifiedLogger;
+  agentId?: string;
 }
 
 export class TerminalService {
@@ -68,13 +71,29 @@ export class TerminalService {
 
       child.on('close', (exitCode) => {
         clearTimeout(timeout);
+        const durationMs = Date.now() - startedAt;
+        const redactedStdout = this.redact(stdout);
+        const redactedStderr = this.redact(stderr);
+        const redactedCommand = this.redact(command);
+
+        if (this.config.logger) {
+          this.config.logger.logCommandExecution(
+            this.config.agentId ?? 'system',
+            redactedCommand,
+            resolvedCwd,
+            exitCode,
+            durationMs,
+            `stdout: ${redactedStdout.slice(0, 500)}\nstderr: ${redactedStderr.slice(0, 500)}`
+          );
+        }
+
         resolve({
-          command: this.redact(command),
+          command: redactedCommand,
           cwd: resolvedCwd,
           exitCode,
-          durationMs: Date.now() - startedAt,
-          stdout: this.redact(stdout),
-          stderr: this.redact(stderr),
+          durationMs,
+          stdout: redactedStdout,
+          stderr: redactedStderr,
           timedOut,
         });
       });

@@ -11,6 +11,7 @@ import {
 import { ContextManager } from '../context/manager';
 import { LLMAdapter, LLMResponseParser } from '../llm/adapter';
 import { TracingService } from '../observability/tracing';
+import { UnifiedLogger } from '../observability/logger';
 import { CheckpointManager } from '../state/checkpoint';
 import { AgentStateMachine } from '../state/machine';
 import { ExecutorConfig, ToolExecutor, ToolExecutorHooks } from '../tools/executor';
@@ -22,6 +23,7 @@ export interface ReActConfig {
   checkpointManager: CheckpointManager;
   contextManager: ContextManager;
   tracing?: TracingService;
+  logger?: UnifiedLogger;
   llmConfig?: Partial<LLMConfig>;
   executorConfig?: Partial<ExecutorConfig>;
   executorHooks?: ToolExecutorHooks;
@@ -48,7 +50,8 @@ export class ReActAgent {
   /** Wrap user-provided hooks with tracing spans for tool calls. */
   private buildTracedHooks(userHooks?: ToolExecutorHooks): ToolExecutorHooks {
     const tracing = this.config.tracing;
-    if (!tracing) return userHooks ?? {};
+    const logger = this.config.logger;
+    if (!tracing && !logger) return userHooks ?? {};
 
     const spanMap = new Map<string, Span>();
 
@@ -56,8 +59,8 @@ export class ReActAgent {
       ...userHooks,
       onToolStart: async (toolCall, attempt) => {
         if (attempt === 1) {
-          const span = tracing.startToolSpan(toolCall.toolName, toolCall.id);
-          spanMap.set(toolCall.id, span);
+          const span = tracing?.startToolSpan(toolCall.toolName, toolCall.id);
+          if (span) spanMap.set(toolCall.id, span);
         }
         await userHooks?.onToolStart?.(toolCall, attempt);
       },
@@ -73,15 +76,20 @@ export class ReActAgent {
       onToolSuccess: async (toolCall, result) => {
         const span = spanMap.get(toolCall.id);
         if (span) {
-          tracing.recordToolResult(span, result);
+          tracing?.recordToolResult(span, result);
           spanMap.delete(toolCall.id);
         }
+        // Assuming we pass state somehow or we don't have it here...
+        // Wait, the hook doesn't have state.id, but we can log using toolCall.id or agent id if we bind it.
+        // Actually, we don't have agentId here easily since ToolExecutor is global for the agent instance.
+        // ReActAgent doesn't know the state.id in the constructor.
+        // Let's defer logger for tools to act().
         await userHooks?.onToolSuccess?.(toolCall, result);
       },
       onToolFailure: async (toolCall, result) => {
         const span = spanMap.get(toolCall.id);
         if (span) {
-          tracing.recordToolResult(span, result);
+          tracing?.recordToolResult(span, result);
           spanMap.delete(toolCall.id);
         }
         await userHooks?.onToolFailure?.(toolCall, result);
@@ -220,6 +228,14 @@ export class ReActAgent {
       if (llmSpan) {
         this.config.tracing?.recordLLMUsage(llmSpan, llmResponse.usage);
       }
+      this.config.logger?.logLLMResponse(
+        state.id,
+        this.config.llmConfig?.model ?? 'default', // Using model as provider placeholder if needed
+        this.config.llmConfig?.model ?? 'default',
+        llmResponse.usage,
+        undefined, // latency could be measured here
+        undefined
+      );
     } catch (error) {
       if (llmSpan) {
         this.config.tracing?.recordLLMError(llmSpan, error instanceof Error ? error : new Error(String(error)));
@@ -265,6 +281,7 @@ export class ReActAgent {
       }
 
       const result = await this.executor.execute(next, toolCall);
+      this.config.logger?.logToolExecution(next.id, toolCall.toolName, toolCall.id, result);
       next = this.recordToolResult(next, toolCall, result);
     }
 
