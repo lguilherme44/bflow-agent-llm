@@ -39,6 +39,34 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
 
   registry.register(
     createTool()
+      .name('ask_user')
+      .summary('Ask the user a question or for clarification')
+      .description('Pauses the task and waits for user input. Use when you need more information, confirmation, or when the user needs to provide a secret or decision.')
+      .whenToUse('Use when you are stuck, need clarification, or want to confirm a risky action with the user.')
+      .expectedOutput('The user\'s response text.')
+      .parameters({
+        type: 'object',
+        properties: {
+          question: { type: 'string', minLength: 1 },
+        },
+        required: ['question'],
+        additionalProperties: false,
+      })
+      .example('Ask for clarification', { question: 'Qual o diretório base para a pesquisa?' })
+      .handler(async (args) => {
+        // In this implementation, we return a special result that ReActAgent should interpret as "need human interaction"
+        // or the Orchestrator will handle the humanApprovalCallback.
+        return { 
+          pending_human: true, 
+          question: args.question,
+          summary: `Aguardando resposta do usuário para: ${args.question}` 
+        };
+      })
+      .build()
+  );
+
+  registry.register(
+    createTool()
       .name('complete_task')
       .summary('Finish the current task')
       .description('Marks the current agent task as complete or failed with a concise summary.')

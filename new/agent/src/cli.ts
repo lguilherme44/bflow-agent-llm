@@ -47,7 +47,7 @@ async function main() {
     return;
   }
 
-  let task = positionalArgs.join(' ') || 'Explore the codebase';
+  let task = positionalArgs.join(' ') || 'Oi! Como posso te ajudar hoje?';
   let resumeId: string | undefined;
 
   // COMMAND: RESUME
@@ -64,7 +64,7 @@ async function main() {
     const candidatePath = path.resolve(process.cwd(), positionalArgs[0]);
     if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isDirectory()) {
       // Shift args if a directory was provided
-      task = positionalArgs.slice(1).join(' ') || 'Explore the codebase';
+      task = positionalArgs.slice(1).join(' ') || 'Oi! Como posso te ajudar hoje?';
     }
   }
 

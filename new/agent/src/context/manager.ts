@@ -42,7 +42,8 @@ export class ContextManager {
   }
 
   private truncateMessages(messages: AgentMessage[]): AgentMessage[] {
-    const perMessageLimit = Math.floor(this.config.maxTokensEstimate * 0.7);
+    // Para janelas de 4096, limitar mensagens individuais a 1000 tokens permite 3-4 mensagens grandes + sistema.
+    const perMessageLimit = 1000;
     
     return messages.map(msg => {
       const estimate = estimateTokensFromText(msg.content);
@@ -52,7 +53,7 @@ export class ContextManager {
 
       const allowedChars = perMessageLimit * 4;
       const truncatedContent = msg.content.slice(0, allowedChars) + 
-        `... [Conteúdo truncado por ser muito longo: ${estimate} tokens, limite por mensagem é ${perMessageLimit} tokens]`;
+        `... [Conteúdo truncado: ${estimate} tokens -> ${perMessageLimit} tokens para economizar contexto]`;
       
       return {
         ...msg,
@@ -243,9 +244,11 @@ export class ContextManager {
         return message;
       }
 
+      // Ideally we'd have the tool name in the message metadata.
+      
       return {
         ...message,
-        content: `[Tool ${message.toolResult.toolCallId} result omitted]`,
+        content: `[Omitido: Resultado da ferramenta (sucesso) para economizar contexto. Use a ferramenta novamente se precisar dos dados.]`,
       };
     });
   }

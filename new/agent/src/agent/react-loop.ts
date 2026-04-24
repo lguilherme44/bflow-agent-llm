@@ -33,7 +33,16 @@ export interface ReActConfig {
   executorHooks?: ToolExecutorHooks;
   humanApprovalCallback?: (toolCall: ToolCall, reason: string) => Promise<boolean>;
   humanApprovalPolicy?: (toolCall: ToolCall, state: AgentState) => string | undefined;
-  onUpdate?: (event: { type: string; role?: string; content?: string; message?: string; usage?: any }) => void;
+  onUpdate?: (event: { 
+    type: string; 
+    role?: string; 
+    content?: string; 
+    message?: string; 
+    usage?: any;
+    latencyMs?: number;
+    contextWindow?: number;
+    reasoningTokens?: number;
+  }) => void;
   hookService?: HookService;
   personaStyle?: PersonaStyle;
   sandboxMode?: SandboxMode;
@@ -351,7 +360,9 @@ export class ReActAgent {
       type: 'message_added', 
       role: 'assistant', 
       content: llmResponse.content,
-      usage: llmResponse.usage 
+      usage: llmResponse.usage,
+      latencyMs: llmResponse.latencyMs,
+      contextWindow: this.config.llmConfig?.contextWindow
     });
 
     await this.config.checkpointManager.checkpoint(next);
@@ -498,6 +509,15 @@ export class ReActAgent {
             state,
             extractSummary(data) ?? 'Task completed through specialized completion tool.'
           ),
+        };
+      }
+
+      // NOVO: Verificar se é um pedido de interação humana (ask_user)
+      if (typeof data === 'object' && data !== null && !Array.isArray(data) && (data as any).pending_human === true) {
+        const question = (data as any).question || 'O agente precisa de sua ajuda.';
+        return {
+          terminal: false,
+          state: AgentStateMachine.requestHumanApproval(state, lastExecution.call, question)
         };
       }
 

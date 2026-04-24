@@ -230,7 +230,10 @@ export interface LLMResponse {
     promptTokens: number;
     completionTokens: number;
     totalTokens: number;
+    reasoningTokens?: number;
   };
+  model?: string;
+  latencyMs?: number;
 }
 
 export interface LLMConfig {
@@ -238,6 +241,7 @@ export interface LLMConfig {
   temperature?: number;
   maxTokens?: number;
   systemPrompt?: string;
+  contextWindow?: number;
 }
 
 export type LLMTaskKind =

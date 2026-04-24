@@ -4,10 +4,8 @@ import { ResearchAgent } from './research.js';
 import { PlanningAgent } from './planning.js';
 import { FeedbackLoopEngine } from './feedback-loop.js';
 import { AgentStateMachine } from '../state/machine.js';
-import { ToolRegistry } from '../tools/registry.js';
 import { createDevelopmentToolRegistry } from '../tools/development-tools.js';
 import { RiskPolicyEngine } from '../utils/risk-engine.js';
-import { LLMResponseParser } from '../llm/adapter.js';
 import { 
     CODER_PROMPT, 
     DEBUG_PROMPT, 
@@ -25,7 +23,15 @@ import { HookService } from './hook-service.js';
 export type OrchestratorEvent = 
   | { type: 'phase_start'; phase: string }
   | { type: 'phase_complete'; phase: string; details?: string }
-  | { type: 'message_added'; role: string; content: string }
+  | { 
+      type: 'message_added'; 
+      role: string; 
+      content: string; 
+      usage?: { promptTokens: number; completionTokens: number; totalTokens: number };
+      latencyMs?: number;
+      contextWindow?: number;
+      reasoningTokens?: number;
+    }
   | { type: 'usage_update'; usage: { promptTokens: number; completionTokens: number; totalTokens: number } }
   | { type: 'error'; message: string }
   | { type: 'human_approval_request'; toolCallId: string; toolName: string; args: any; riskEvaluation?: any };
@@ -65,7 +71,15 @@ export class OrchestratorAgent {
         ...this.config,
         onUpdate: (event) => {
             if (event.type === 'message_added') {
-                this.notify({ type: 'message_added', role: event.role!, content: event.content! });
+                this.notify({ 
+                    type: 'message_added', 
+                    role: event.role!, 
+                    content: event.content!,
+                    usage: event.usage,
+                    latencyMs: event.latencyMs,
+                    contextWindow: event.contextWindow,
+                    reasoningTokens: event.reasoningTokens
+                });
             }
         },
         humanApprovalPolicy: (toolCall) => {
@@ -138,97 +152,77 @@ export class OrchestratorAgent {
     const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const currentContext = `Data: ${dateStr} (${dayName}), Hora: ${timeStr}`;
 
-    // --- ETAPA: CLASSIFICAÇÃO DE INTENÇÃO ---
+    // --- ETAPA: CLASSIFICAÇÃO DE INTENÇÃO (Otimizada para economizar tokens no início) ---
     const intentSpan = tracing?.startPhaseSpan('Intent Classification', orchestratorSpan);
-    const intentPrompt = `Analise a tarefa do usuário: "${task}"\nContexto temporal: ${currentContext}\nResponda apenas com uma palavra: "CHAT" se for uma saudação, conversa informal ou pergunta genérica. "TASK" se for um comando técnico, solicitação de código, análise de arquivos ou tarefa de engenharia.`;
+    
+    const isGreeting = /^(oi|olá|ola|hello|hi|bom dia|boa tarde|boa noite|apresente-se|quem é você)(\!|\?|\.)*$/i.test(task.trim());
     
     let intent: string;
-    try {
-      const intentResponse = await this.config.llm.complete([{ 
-          role: 'system', 
-          content: 'Você é um classificador de intenções. Responda apenas "CHAT" ou "TASK".',
-          timestamp: new Date().toISOString()
-      }, { 
-          role: 'user', 
-          content: intentPrompt,
-          timestamp: new Date().toISOString()
-      }], { ...this.config.llmConfig, temperature: 0 });
+    if (isGreeting || task === 'Oi! Como posso te ajudar hoje?') {
+      intent = 'CHAT';
+      intentSpan?.setAttributes({ 'orchestrator.intent': intent, 'orchestrator.classification_skipped': true });
+      intentSpan?.end();
+    } else {
+      const intentPrompt = `Analise a tarefa do usuário: "${task}"\nContexto temporal: ${currentContext}\n\nResponda apenas com uma palavra:\n- "CHAT": se for uma saudação (oi, olá), conversa informal, apresentação (quem é você, o que você faz), ou pedido para se apresentar.\n- "TASK": se for um comando técnico, solicitação de código, análise de arquivos, bugfix ou tarefa de engenharia.`;
+      
+      try {
+        const intentResponse = await this.config.llm.complete([{ 
+            role: 'system', 
+            content: 'Você é um classificador de intenções. Responda apenas "CHAT" ou "TASK".',
+            timestamp: new Date().toISOString()
+        }, { 
+            role: 'user', 
+            content: intentPrompt,
+            timestamp: new Date().toISOString()
+        }], { ...this.config.llmConfig, temperature: 0 });
 
-      intent = intentResponse.content.trim().toUpperCase();
-      intentSpan?.setAttributes({ 'orchestrator.intent': intent });
-      intentSpan?.end();
-    } catch (error) {
-      intentSpan?.setStatus({ code: 2, message: String(error) });
-      intentSpan?.end();
-      throw error;
+        intent = intentResponse.content.trim().toUpperCase();
+        intentSpan?.setAttributes({ 'orchestrator.intent': intent });
+        intentSpan?.end();
+      } catch (error) {
+        intentSpan?.setStatus({ code: 2, message: String(error) });
+        intentSpan?.end();
+        throw error;
+      }
     }
 
     if (intent.includes('CHAT')) {
         this.notify({ type: 'phase_start', phase: 'Chat' });
         logger?.logEvent(state.id, 'phase_started', { phase: 'Chat' });
         
-        // ECONOMIA DE TOKENS: Para Chat, não precisamos de todas as ferramentas de dev
-        const chatRegistry = new ToolRegistry();
-        // O ReActAgent precisa do complete_task para finalizar
-        chatRegistry.register(this.config.registry.get('complete_task')!);
+        const chatResponse = await this.config.llm.complete([
+          { 
+            role: 'system', 
+            content: 'Você é um assistente amigável. Responda em Português (PT-BR) de forma natural e concisa. Não use ferramentas nem JSON, apenas texto puro.',
+            timestamp: new Date().toISOString()
+          },
+          { 
+            role: 'user', 
+            content: task,
+            timestamp: new Date().toISOString()
+          }
+        ], this.config.llmConfig);
 
-        const chatAgent = new ReActAgent({
-            ...this.liveConfig,
-            registry: chatRegistry, // Registry enxuto = prompt minúsculo
-            llmConfig: {
-                ...this.config.llmConfig,
-                systemPrompt: `Você é um assistente amigável. Contexto temporal: ${currentContext}. Responda à saudação ou pergunta do usuário em Português (PT-BR) de forma natural e depois use complete_task para encerrar a interação.`
-            }
-        });
-
-        const chatState = await chatAgent.run(task, undefined, orchestratorSpan);
-        this.totalUsage.totalTokens = chatState.metadata.totalTokensUsed || 0;
+        this.totalUsage.promptTokens += chatResponse.usage.promptTokens;
+        this.totalUsage.completionTokens += chatResponse.usage.completionTokens;
+        this.totalUsage.totalTokens += chatResponse.usage.totalTokens;
+        
         this.notify({ type: 'usage_update', usage: this.totalUsage });
+        this.notify({ 
+          type: 'message_added', 
+          role: 'assistant', 
+          content: chatResponse.content,
+          usage: chatResponse.usage,
+          latencyMs: chatResponse.latencyMs
+        });
         
-        // Extrair e exibir a resposta final no quadro verde
-        const lastMsg = chatState.messages.filter(m => m.role === 'assistant').at(-1)?.content || '';
-        let summary = 'Olá! Como posso ajudar hoje?';
-
-        // 1. Tentar pegar o resumo da finalização do estado (mais confiável)
-        const completionEvent = chatState.eventHistory.find(e => e.type === 'task_completed');
-        if (completionEvent?.reason) {
-            summary = completionEvent.reason;
-        } else {
-            // 2. Tentar extrair do JSON da última mensagem
-            try {
-                const parsed = LLMResponseParser.parse(lastMsg);
-                if (parsed.finalResponse) {
-                    summary = parsed.finalResponse.summary;
-                } else {
-                    // 3. Fallback para extração manual se o parser não pegou como final
-                    const clean = lastMsg.replace(/<\|[\s\S]*?\|>/g, '').replace(/```json|```/g, '').trim();
-                    if (clean.startsWith('{')) {
-                        const jsonObj = JSON.parse(clean);
-                        summary = jsonObj.summary || jsonObj.final?.summary || jsonObj.thought || clean;
-                    } else {
-                        summary = clean || lastMsg;
-                    }
-                }
-            } catch {
-                summary = lastMsg.replace(/<\|[\s\S]*?\|>/g, '').trim() || lastMsg;
-            }
-        }
-
-        // Limpeza final: se o resumo for apenas JSON ou tags, tenta limpar
-        summary = summary.replace(/<\|[\s\S]*?\|>/g, '').trim();
-        if (summary.startsWith('{') && summary.includes('"summary"')) {
-            try {
-                const p = JSON.parse(summary);
-                summary = p.summary || summary;
-            } catch {}
-        }
-
-        this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${summary}` });
+        this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${chatResponse.content}` });
         this.notify({ type: 'phase_complete', phase: 'Finalized' });
-        logger?.logEvent(state.id, 'phase_completed', { phase: 'Chat', summary });
         
-        orchestratorSpan?.end();
-        return { state: chatState };
+        state = AgentStateMachine.dispatch(state, { type: 'task_completed' });
+        state.metadata.totalTokensUsed = this.totalUsage.totalTokens;
+        
+        return { state };
     }
 
     // --- FLUXO NORMAL DE TAREFA ---

@@ -151,11 +151,17 @@ export class OpenAIProvider extends BaseHttpProvider {
   }
 
   protected extractUsage(payload: Record<string, unknown>): LLMProviderResponse['usage'] {
-    const usage = payload.usage as { prompt_tokens?: number; completion_tokens?: number; total_tokens?: number } | undefined;
+    const usage = payload.usage as { 
+      prompt_tokens?: number; 
+      completion_tokens?: number; 
+      total_tokens?: number;
+      completion_tokens_details?: { reasoning_tokens?: number }
+    } | undefined;
     return {
       promptTokens: usage?.prompt_tokens ?? 0,
       completionTokens: usage?.completion_tokens ?? 0,
       totalTokens: usage?.total_tokens ?? 0,
+      reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens
     };
   }
 }

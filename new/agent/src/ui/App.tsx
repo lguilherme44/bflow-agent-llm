@@ -272,7 +272,12 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
 
   const [currentPhase, setCurrentPhase] = useState('Ready');
   const [completedPhases, setCompletedPhases] = useState<string[]>([]);
-  const [usage, setUsage] = useState({ totalTokens: initialState?.metadata?.totalTokensUsed || 0 });
+  const [usage, setUsage] = useState({ 
+    totalTokens: initialState?.metadata?.totalTokensUsed || 0,
+    latencyMs: 0,
+    contextWindow: 0,
+    reasoningTokens: 0
+  });
   const [error, setError] = useState<string | null>(initialState?.metadata?.errorMessage || null);
   const [finalResult, setFinalResult] = useState<string | null>(null);
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
@@ -325,13 +330,17 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
       setActiveTask(normalizedTask);
       setStatus('running');
       setCompletedPhases([]);
-      setMessages((previous) =>
-        appendMessage(previous, {
-          role: 'user',
-          content: normalizedTask,
-          timestamp,
-        })
-      );
+      
+      const isDefaultTask = normalizedTask === 'Oi! Como posso te ajudar hoje?';
+      if (!isDefaultTask) {
+        setMessages((previous) =>
+          appendMessage(previous, {
+            role: 'user',
+            content: normalizedTask,
+            timestamp,
+          })
+        );
+      }
     } else {
       setIsRunning(true);
       setStatus('running');
@@ -388,10 +397,20 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
               timestamp: nowLabel(),
             })
           );
+          
+          if (event.usage || event.latencyMs) {
+            setUsage(prev => ({
+              ...prev,
+              totalTokens: event.usage?.totalTokens ?? prev.totalTokens,
+              latencyMs: event.latencyMs ?? prev.latencyMs,
+              contextWindow: event.contextWindow ?? prev.contextWindow,
+              reasoningTokens: event.reasoningTokens ?? prev.reasoningTokens
+            }));
+          }
           break;
         }
         case 'usage_update':
-          setUsage({ totalTokens: event.usage.totalTokens });
+          setUsage(prev => ({ ...prev, totalTokens: event.usage.totalTokens }));
           break;
         case 'error':
           setStatus('error');
@@ -521,10 +540,26 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
 
         <Box flexDirection="column" alignItems={compactLayout ? 'flex-start' : 'flex-end'}>
           <Text bold>
-            Tokens da sessao:{' '}
-            <Text color="magenta">{usage.totalTokens.toLocaleString('pt-BR')}</Text>
+            Uso: <Text color="magenta">{usage.totalTokens.toLocaleString('pt-BR')}</Text>
+            {usage.contextWindow > 0 && (
+              <Text> / <Text color="cyan">{usage.contextWindow.toLocaleString('pt-BR')}</Text></Text>
+            )}
+            <Text dimColor> tokens</Text>
           </Text>
-          <Text dimColor>{messages.length} eventos registrados no buffer visual</Text>
+          <Box>
+            {usage.latencyMs > 0 && (
+              <Box marginRight={1}>
+                <Text dimColor>
+                  Lat: <Text color="yellow">{(usage.latencyMs / 1000).toFixed(1)}s</Text>
+                </Text>
+              </Box>
+            )}
+            {usage.reasoningTokens > 0 && (
+              <Text dimColor>
+                Raciocinio: <Text color="blue">{usage.reasoningTokens}</Text>
+              </Text>
+            )}
+          </Box>
         </Box>
       </Box>
 

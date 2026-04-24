@@ -79,7 +79,7 @@ async function main() {
     return;
   }
 
-  let initialTask = positionalArgs.join(' ').trim() || 'Explore the codebase';
+  let initialTask = positionalArgs.join(' ').trim() || 'Oi! Como posso te ajudar hoje?';
   let initialState: any = undefined;
 
   // COMMAND: RESUME
@@ -94,13 +94,13 @@ async function main() {
       console.error(`Erro: Sessao ${resumeId} nao encontrada.`);
       process.exit(1);
     }
-    initialTask = initialState.currentTask || 'Explore the codebase';
+    initialTask = initialState.currentTask || 'Oi! Como posso te ajudar hoje?';
   } else if (positionalArgs.length > 0) {
     // If the first positional argument is a valid directory, use it as workspaceRoot
     const candidatePath = path.resolve(process.cwd(), positionalArgs[0]);
     if (fs.existsSync(candidatePath) && fs.statSync(candidatePath).isDirectory()) {
       workspaceRoot = candidatePath;
-      initialTask = positionalArgs.slice(1).join(' ').trim() || 'Explore the codebase';
+      initialTask = positionalArgs.slice(1).join(' ').trim() || 'Oi! Como posso te ajudar hoje?';
     }
   }
 
