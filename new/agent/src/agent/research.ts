@@ -75,12 +75,13 @@ export class ResearchAgent {
           `\nREGRAS CRÍTICAS:` +
           `\n1. FALE APENAS EM PORTUGUÊS (PT-BR).` +
           `\n2. VOCÊ DEVE USAR OBRIGATORIAMENTE UMA FERRAMENTA EM TODAS AS RESPOSTAS.` +
-          `\n3. Use a ferramenta 'submit_research_brief' para finalizar sua fase. VOCÊ SÓ PODE TERMINAR USANDO ESTA FERRAMENTA.` +
+          `\n3. Use a ferramenta 'submit_research_brief' para finalizar sua fase. VOCÊ SÓ PODE TERMINAR USANDO ESTA FERRAMENTA. NÃO ENVIE APENAS TEXTO OU JSON SOLTO.` +
           `\n4. SE NÃO HOUVER NADA PARA PESQUISAR, use 'submit_research_brief' IMEDIATAMENTE com um resumo apropriado.` +
           `\n5. USE SEMPRE OS CAMINHOS EXATOS RETORNADOS PELAS FERRAMENTAS. NÃO ADICIONE NEM REMOVA PREFIXOS DE DIRETÓRIO.` +
           `\n\nESTRATÉGIA DE PESQUISA RECOMENDADA:` +
           `\n- Passo 1: list_files ou git_status para ver a estrutura do projeto` +
-          `\n- Passo 2: submit_research_brief quando tiver informações suficientes.`
+          `\n- Passo 2: read_file ou search_text para entender o conteúdo` +
+          `\n- Passo 3: submit_research_brief OBRIGATORIAMENTE para entregar o resultado.`
       }
     });
   }
@@ -110,14 +111,18 @@ export class ResearchAgent {
           try {
             // We use the same parser logic to find JSON blocks
             const jsonText = LLMResponseParser.extractJson(content) || content;
-            const parsed = JSON.parse(jsonText.includes('{') ? jsonText.slice(jsonText.indexOf('{'), jsonText.lastIndexOf('}') + 1) : '{}');
-            if (parsed.summary || parsed.taskType) {
+            const parsedRaw = JSON.parse(jsonText.includes('{') ? jsonText.slice(jsonText.indexOf('{'), jsonText.lastIndexOf('}') + 1) : '{}');
+            
+            // Handle models that wrap the brief in a "ResearchBrief" or "brief" key
+            const parsed = (parsedRaw.ResearchBrief || parsedRaw.brief || parsedRaw) as any;
+
+            if (parsed.summary || parsed.taskType || parsed.Objetivo) {
               brief = {
                 taskType: (parsed.taskType as any) || 'investigation',
-                entryPoints: Array.isArray(parsed.entryPoints) ? parsed.entryPoints : [],
+                entryPoints: Array.isArray(parsed.entryPoints) ? parsed.entryPoints : (Array.isArray(parsed['Principais Arquivos']) ? parsed['Principais Arquivos'] : []),
                 dependencies: Array.isArray(parsed.dependencies) ? parsed.dependencies : [],
                 risks: Array.isArray(parsed.risks) ? parsed.risks : [],
-                summary: Array.isArray(parsed.summary) ? parsed.summary.join('\n') : String(parsed.summary || '')
+                summary: Array.isArray(parsed.summary) ? parsed.summary.join('\n') : String(parsed.summary || parsed.Objetivo || parsed.Contexto || '')
               };
               break;
             }

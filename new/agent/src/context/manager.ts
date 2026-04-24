@@ -22,7 +22,7 @@ export class ContextManager {
   constructor(config?: Partial<ContextConfig>) {
     this.config = {
       maxMessages: 50,
-      maxTokensEstimate: 3_500, // Ajustado para modelos locais com context window pequena (ex: 4096)
+      maxTokensEstimate: 6_500, // Ajustado para modelos locais com context window de 8k+
       summarizeThreshold: 20,
       ...config,
     };
@@ -42,8 +42,8 @@ export class ContextManager {
   }
 
   private truncateMessages(messages: AgentMessage[]): AgentMessage[] {
-    // Para janelas de 4096, limitar mensagens individuais a 1000 tokens permite 3-4 mensagens grandes + sistema.
-    const perMessageLimit = 1000;
+    // Para janelas de 8192, limitar mensagens individuais a 5000 tokens permite arquivos grandes + sistema.
+    const perMessageLimit = 5000;
     
     return messages.map(msg => {
       const estimate = estimateTokensFromText(msg.content);

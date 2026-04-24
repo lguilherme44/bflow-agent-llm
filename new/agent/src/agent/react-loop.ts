@@ -234,7 +234,7 @@ export class ReActAgent {
           // This prevents "lazy" models or conversational models from finishing prematurely.
           state = AgentStateMachine.addMessage(state, {
             role: 'system',
-            content: 'Você não forneceu nenhuma chamada de ferramenta estruturada em JSON. Relembre o contrato: { "thought": "sua explicação", "tool": "nome_da_ferramenta", "arguments": { ... } }. Use uma ferramenta para progredir ou "complete_task" se terminou.',
+            content: 'Você não forneceu nenhuma chamada de ferramenta estruturada em JSON. Relembre o contrato: { "thought": "sua explicação", "tool": "nome_da_ferramenta", "arguments": { ... } }. Se você terminou, use a ferramenta de finalização apropriada (ex: submit_research_brief ou complete_task). Caso contrário, continue usando as ferramentas para progredir.',
             timestamp: new Date().toISOString(),
           });
           
