@@ -1,9 +1,0 @@
-node_modules/
-dist/
-.agent/
-.agent-checkpoints/
-.continue/
-*.log
-.env
-.DS_Store
-Thumbs.db

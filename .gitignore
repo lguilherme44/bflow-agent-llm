@@ -1,7 +1,9 @@
 node_modules/
 dist/
-.env
 .agent/
 .agent-checkpoints/
 .continue/
 *.log
+.env
+.DS_Store
+Thumbs.db
