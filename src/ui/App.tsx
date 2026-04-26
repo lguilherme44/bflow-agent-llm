@@ -11,6 +11,7 @@ import Spinner from 'ink-spinner';
 import TextInput from 'ink-text-input';
 import { OrchestratorAgent, OrchestratorEvent } from '../agent/orchestrator.js';
 import { RiskEvaluation } from '../utils/risk-engine.js';
+import { loadConfig, saveConfig, AgentConfig } from '../utils/config.js';
 
 interface AppProps {
   orchestrator: OrchestratorAgent;
@@ -286,6 +287,8 @@ export const App = ({ orchestrator, initialTask = '', initialState, modelName, p
   const [lastEventAt, setLastEventAt] = useState<string | null>(initialState ? nowLabel() : null);
   const [hasAutoStarted, setHasAutoStarted] = useState(false);
   const [isAutonomous, setIsAutonomous] = useState(false);
+  const [connectionStep, setConnectionStep] = useState<'provider' | 'model' | 'url' | null>(null);
+  const [tempConfig, setTempConfig] = useState<Partial<AgentConfig>>({});
 
   const deferredMessages = useDeferredValue(messages);
   const deferredFinalResult = useDeferredValue(finalResult);
@@ -325,6 +328,39 @@ export const App = ({ orchestrator, initialTask = '', initialState, modelName, p
     const normalizedTask = compactWhitespace(task);
     if (!normalizedTask || isRunning) {
       return;
+    }
+
+    // Intercept commands
+    if (normalizedTask.startsWith('/')) {
+      const args = normalizedTask.split(' ');
+      const cmd = args[0].toLowerCase();
+
+      if (cmd === '/status') {
+        const config = loadConfig();
+        setMessages((prev) => appendMessage(prev, {
+          role: 'system',
+          content: `CONFIGURAÇÃO: Provider=${config.provider}, Modelo=${config.model || 'Padrão'}, URL=${config.baseUrl || 'Padrão'}`,
+          timestamp: nowLabel()
+        }));
+        setQuery('');
+        return;
+      }
+
+      if (cmd === '/connect') {
+        setConnectionStep('provider');
+        setQuery('');
+        return;
+      }
+
+      if (cmd === '/help') {
+        setMessages((prev) => appendMessage(prev, {
+          role: 'system',
+          content: 'COMANDOS: /connect (configurar LLM), /status (ver config), /help (ajuda)',
+          timestamp: nowLabel()
+        }));
+        setQuery('');
+        return;
+      }
     }
 
     const timestamp = nowLabel();
@@ -643,7 +679,63 @@ export const App = ({ orchestrator, initialTask = '', initialState, modelName, p
 
       <Text color="gray">{horizontalRule(contentWidth)}</Text>
 
-      {pendingApproval ? (
+      {connectionStep ? (
+        <Box
+          flexDirection="column"
+          borderStyle="double"
+          borderColor="yellow"
+          paddingX={1}
+          marginTop={1}
+          width={contentWidth}
+        >
+          <SectionTitle 
+            title={
+              connectionStep === 'provider' ? 'Selecionar Provider (1-5)' : 
+              connectionStep === 'model' ? 'Definir Modelo' : 'Definir Base URL'
+            } 
+          />
+          {connectionStep === 'provider' && (
+            <Box flexDirection="column" marginBottom={1}>
+              <Text>1. OpenAI  2. Anthropic  3. Ollama  4. LM Studio  5. OpenRouter</Text>
+              <Text dimColor>Digite o numero e pressione Enter</Text>
+            </Box>
+          )}
+          <Box>
+            <Text bold color="yellow">{connectionStep === 'provider' ? 'Opção: ' : connectionStep === 'model' ? 'Modelo: ' : 'URL: '}</Text>
+            <TextInput
+              value={query}
+              onChange={setQuery}
+              onSubmit={(value) => {
+                if (connectionStep === 'provider') {
+                  const providers: AgentConfig['provider'][] = ['openai', 'anthropic', 'ollama', 'lmstudio', 'openrouter'];
+                  const p = providers[parseInt(value) - 1];
+                  if (p) {
+                    setTempConfig({ provider: p });
+                    setConnectionStep('model');
+                  }
+                } else if (connectionStep === 'model') {
+                  if (value) setTempConfig(prev => ({ ...prev, model: value }));
+                  setConnectionStep('url');
+                } else if (connectionStep === 'url') {
+                  const finalConfig = { ...tempConfig };
+                  if (value) finalConfig.baseUrl = value;
+                  saveConfig(finalConfig);
+                  setConnectionStep(null);
+                  setMessages(prev => appendMessage(prev, {
+                    role: 'system',
+                    content: '✅ Configuração salva! Reinicie para aplicar as mudanças.',
+                    timestamp: nowLabel()
+                  }));
+                }
+                setQuery('');
+              }}
+            />
+          </Box>
+          <Box marginTop={1}>
+            <Text dimColor>Pressione Esc ou envie vazio para cancelar (não implementado, use /help se perder)</Text>
+          </Box>
+        </Box>
+      ) : pendingApproval ? (
         <Box
           flexDirection="column"
           borderStyle="round"

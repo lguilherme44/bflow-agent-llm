@@ -294,8 +294,24 @@ export class ContextManager {
 
   private scoreFile(previous: RelevantFileContext | undefined, reason: string | undefined, read: boolean): number {
     const base = previous?.score ?? 0;
-    const reasonBoost = reason ? Math.min(reason.length / 10, 10) : 0;
-    const accessBoost = read ? 6 : 10;
-    return Math.min(100, base * 0.9 + accessBoost + reasonBoost);
+    
+    // Boost por razão (se houver palavras-chave da task)
+    const reasonBoost = reason ? Math.min(reason.length / 5, 15) : 0;
+    
+    // Boost por acesso (leitura ou escrita)
+    const accessBoost = read ? 8 : 15;
+    
+    // Penalidade por tempo (decrescimento suave)
+    const decay = 0.95;
+    
+    // Centralidade: arquivos na raiz ou em pastas core ganham um pequeno boost passivo
+    let centralityBoost = 0;
+    if (previous?.filepath) {
+      if (previous.filepath.includes('src/types') || previous.filepath.includes('src/index')) {
+        centralityBoost = 5;
+      }
+    }
+
+    return Math.min(100, (base * decay) + accessBoost + reasonBoost + centralityBoost);
   }
 }

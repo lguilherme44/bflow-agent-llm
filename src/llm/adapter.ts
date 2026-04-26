@@ -4,6 +4,7 @@ import { estimateTokensFromText, toJsonValue } from '../utils/json.js';
 
 export interface LLMAdapter {
   complete(messages: AgentMessage[], config?: Partial<LLMConfig>): Promise<LLMResponse>;
+  stream?(messages: AgentMessage[], config?: Partial<LLMConfig>, onStream?: (chunk: string) => void): AsyncIterable<string>;
 }
 
 export interface ParsedLLMContent {
@@ -170,6 +171,18 @@ export class MockLLMAdapter implements LLMAdapter {
         totalTokens: promptTokens + completionTokens,
       },
     };
+  }
+
+  async *stream(messages: AgentMessage[], _config?: Partial<LLMConfig>, onStream?: (chunk: string) => void): AsyncIterable<string> {
+    const content = this.pickResponse(messages);
+    // Simula streaming quebrando em palavras
+    const words = content.split(' ');
+    for (const word of words) {
+        const chunk = word + ' ';
+        yield chunk;
+        onStream?.(chunk);
+        await new Promise(resolve => setTimeout(resolve, 10)); // Pequeno delay
+    }
   }
 
   private pickResponse(messages: AgentMessage[]): string {

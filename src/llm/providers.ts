@@ -26,6 +26,68 @@ abstract class BaseHttpProvider implements LLMProvider {
 
   abstract readonly capabilities: LLMProvider['capabilities'];
 
+  async *stream(request: LLMProviderRequest): AsyncIterable<string> {
+    const model = request.config?.model ?? this.defaultModel;
+    const body = {
+      ...this.body(request, model),
+      stream: true,
+    };
+
+    const response = await fetch(this.endpoint(), {
+      method: 'POST',
+      headers: this.headers(),
+      body: JSON.stringify(body),
+      signal: request.signal,
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`${this.name} provider streaming failed: ${response.status} ${text}`);
+    }
+
+    if (!response.body) {
+      return;
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || !trimmed.startsWith('data: ')) continue;
+          
+          const data = trimmed.slice(6);
+          if (data === '[DONE]') break;
+
+          try {
+            const chunk = JSON.parse(data);
+            const content = this.extractStreamContent(chunk);
+            if (content) {
+              yield content;
+              request.onStream?.(content);
+            }
+          } catch (e) {
+            // Ignorar erros de parse parciais
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  protected abstract extractStreamContent(payload: Record<string, unknown>): string | undefined;
+
   async complete(request: LLMProviderRequest): Promise<LLMProviderResponse> {
     const startedAt = Date.now();
     const model = request.config?.model ?? this.defaultModel;
@@ -126,6 +188,7 @@ export class OpenAIProvider extends BaseHttpProvider {
           parameters: tool.parameters,
         },
       })),
+      stream_options: request.config?.model?.includes('gpt') ? { include_usage: true } : undefined,
     };
   }
 
@@ -163,6 +226,13 @@ export class OpenAIProvider extends BaseHttpProvider {
       totalTokens: usage?.total_tokens ?? 0,
       reasoningTokens: usage?.completion_tokens_details?.reasoning_tokens
     };
+  }
+
+  protected extractStreamContent(payload: Record<string, unknown>): string | undefined {
+    const choices = payload.choices;
+    if (!Array.isArray(choices) || choices.length === 0) return undefined;
+    const delta = (choices[0] as { delta?: { content?: string } }).delta;
+    return delta?.content;
   }
 }
 
@@ -228,6 +298,14 @@ export class AnthropicProvider extends BaseHttpProvider {
       totalTokens: promptTokens + completionTokens,
     };
   }
+
+  protected extractStreamContent(payload: Record<string, unknown>): string | undefined {
+    if (payload.type === 'content_block_delta') {
+      const delta = payload.delta as { text?: string };
+      return delta?.text;
+    }
+    return undefined;
+  }
 }
 
 export class OpenRouterProvider extends OpenAIProvider {
@@ -243,11 +321,15 @@ export class OpenRouterProvider extends OpenAIProvider {
 
 export class LMStudioProvider extends OpenAIProvider {
   constructor(config?: Partial<HttpProviderConfig>) {
-    super({
+    const defaults: HttpProviderConfig = {
       name: 'lmstudio',
       baseUrl: 'http://localhost:1234/v1/chat/completions',
       defaultModel: 'local-model',
-      ...config,
+    };
+    
+    super({
+      ...defaults,
+      ...Object.fromEntries(Object.entries(config ?? {}).filter(([_, v]) => v !== undefined))
     });
   }
 
@@ -264,15 +346,27 @@ export class LMStudioProvider extends OpenAIProvider {
       Authorization: `Bearer ${this.config.apiKey ?? 'lm-studio'}`,
     };
   }
+
+  protected override endpoint(): string {
+    const base = this.config.baseUrl.replace(/\/$/, '');
+    if (base.endsWith('/chat/completions')) return base;
+    if (base.endsWith('/v1')) return `${base}/chat/completions`;
+    return `${base}/v1/chat/completions`;
+  }
 }
+
 
 export class OllamaProvider extends OpenAIProvider {
   constructor(config?: Partial<HttpProviderConfig>) {
-    super({
+    const defaults: HttpProviderConfig = {
       name: 'ollama',
       baseUrl: 'http://localhost:11434',
       defaultModel: 'llama3',
-      ...config,
+    };
+
+    super({
+      ...defaults,
+      ...Object.fromEntries(Object.entries(config ?? {}).filter(([_, v]) => v !== undefined))
     });
   }
 

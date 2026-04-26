@@ -622,7 +622,19 @@ export function createDevelopmentToolRegistry(options?: DevelopmentToolOptions):
       .handler(async (args) => {
         const packageName = packageArg(args.packageName);
         const flag = args.dev === true ? '--save-dev' : '';
-        return terminal.executeCommand(`npm.cmd install ${flag} ${packageName}`.trim(), '.');
+        const result = await terminal.executeCommand(`npm.cmd install ${flag} ${packageName}`.trim(), '.');
+        
+        // Validação de lockfile (Fase 5.4)
+        const status = await git.getParsedStatus();
+        const lockfileChanged = status.some(s => s.filepath === 'package-lock.json' || s.filepath === 'yarn.lock');
+        
+        return {
+          ...result,
+          lockfileChanged,
+          summary: result.exitCode === 0 
+            ? `Pacote ${packageName} instalado.${lockfileChanged ? ' Lockfile atualizado.' : ' AVISO: Lockfile não alterado.'}`
+            : `Falha ao instalar ${packageName}.`
+        };
       })
       .build()
   );
@@ -776,7 +788,7 @@ function packageArg(value: JsonValue | undefined): string {
   return packageName;
 }
 
-type ValidationScript = 'build' | 'lint' | 'test';
+type ValidationScript = 'build' | 'lint' | 'test' | 'security';
 
 interface ValidationGateResult {
   ok: boolean;
@@ -851,6 +863,23 @@ async function runValidationGate(
         error: `Test validation failed (exit code ${testResult.exitCode ?? 'unknown'}).`,
         failures: TerminalOutputParser.parseTestFailures(testResult.stdout, testResult.stderr),
       };
+    }
+  }
+
+  // Placeholder para Security Scan (Fase 5.4)
+  if (scriptsToRun.includes('security')) {
+    if (availableScripts.has('security')) {
+      const securityResult = await terminal.executeCommand('npm.cmd run security', '.');
+      if (securityResult.exitCode !== 0) {
+        return {
+          ok: false,
+          skipped,
+          error: `Security scan failed (exit code ${securityResult.exitCode}).`,
+        };
+      }
+    } else if (availableScripts.has('audit')) {
+       // npm audit como fallback de security scan básico
+       await terminal.executeCommand('npm.cmd audit', '.');
     }
   }
 

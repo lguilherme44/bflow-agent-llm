@@ -11,6 +11,7 @@ import { CheckpointManager, FileCheckpointStorage } from './state/checkpoint.js'
 import { createDevelopmentToolRegistry } from './tools/development-tools.js';
 import { App } from './ui/App.js';
 import { loadEnv } from './utils/env.js';
+import { loadConfig } from './utils/config.js';
 
 // Load environment variables from .env file manually
 loadEnv();
@@ -18,7 +19,8 @@ loadEnv();
 type ProviderName = 'openai' | 'anthropic' | 'openrouter' | 'lmstudio' | 'ollama';
 
 function resolveProviderName(args: string[]): ProviderName {
-  let fallbackProvider: ProviderName = (process.env.AGENT_LLM_PROVIDER as ProviderName) || 'lmstudio';
+  const config = loadConfig();
+  let fallbackProvider: ProviderName = config.provider || (process.env.AGENT_LLM_PROVIDER as ProviderName) || 'lmstudio';
 
   if (process.env.OPENAI_API_KEY) {
     fallbackProvider = 'openai';
@@ -47,14 +49,18 @@ function resolveSandboxMode(args: string[]): any {
 }
 
 function resolveProvider(providerName: ProviderName) {
+  const config = loadConfig();
   if (providerName === 'lmstudio') {
-    return new LMStudioProvider();
+    return new LMStudioProvider({
+      baseUrl: config.baseUrl || process.env.AGENT_LLM_BASE_URL,
+      defaultModel: config.model || process.env.AGENT_LLM_MODEL
+    });
   }
 
   if (providerName === 'ollama') {
     return new OllamaProvider({
-      defaultModel: process.env.AGENT_LLM_MODEL,
-      baseUrl: process.env.AGENT_LLM_BASE_URL
+      defaultModel: config.model || process.env.AGENT_LLM_MODEL,
+      baseUrl: config.baseUrl || process.env.AGENT_LLM_BASE_URL
     });
   }
 
@@ -62,6 +68,7 @@ function resolveProvider(providerName: ProviderName) {
 }
 
 async function main() {
+  const config = loadConfig();
   const args = process.argv.slice(2);
   const providerName = resolveProviderName(args);
   const positionalArgs = args.filter((arg) => !arg.startsWith('--'));
@@ -137,7 +144,8 @@ async function main() {
     humanApprovalCallback: async () => true,
     llmConfig: {
       model: provider.defaultModel,
-      temperature: 0.2,
+      temperature: config.temperature ?? 0.2,
+      maxTokens: config.maxTokens ?? 2048,
     },
   });
 

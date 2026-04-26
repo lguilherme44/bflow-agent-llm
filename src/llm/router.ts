@@ -70,6 +70,42 @@ export class LLMRouter {
     throw new Error(`All LLM providers failed. ${errors.join(' | ')}`);
   }
 
+  async *stream(input: {
+    messages: AgentMessage[];
+    taskKind?: LLMTaskKind;
+    config?: Partial<LLMConfig>;
+    tools?: ToolSchema[];
+    onStream?: (chunk: string) => void;
+  }): AsyncIterable<string> {
+    const taskKind = input.taskKind ?? 'general';
+    const orderedProviders = this.providerOrder(taskKind);
+
+    for (const provider of orderedProviders) {
+      if (!provider.stream || !provider.capabilities.streaming) continue;
+
+      try {
+        const model = input.config?.model ?? this.policy.taskModelPreferences[taskKind] ?? provider.defaultModel;
+        const request: LLMProviderRequest = {
+          messages: redactMessages(input.messages),
+          config: { ...input.config, model },
+          taskKind,
+          tools: provider.capabilities.nativeToolCalling ? input.tools : undefined,
+          onStream: input.onStream,
+        };
+
+        for await (const chunk of provider.stream(request)) {
+          yield chunk;
+        }
+        return; // Sucesso no primeiro provedor que suporta streaming
+      } catch (error) {
+        // Fallback para o próximo provedor
+      }
+    }
+
+    // Se nenhum streaming funcionar, podemos cair para complete() ou falhar
+    throw new Error('Streaming failed on all available providers');
+  }
+
   private providerOrder(taskKind: LLMTaskKind): LLMProvider[] {
     const preferredModelProvider = this.providerForModel(this.policy.taskModelPreferences[taskKind]);
     const names = [
@@ -124,6 +160,16 @@ export class RouterLLMAdapter implements LLMAdapter {
       config,
       taskKind: this.taskKind,
       tools: this.tools,
+    });
+  }
+
+  async *stream(messages: AgentMessage[], config?: Partial<LLMConfig>, onStream?: (chunk: string) => void): AsyncIterable<string> {
+    yield* this.router.stream({
+      messages,
+      config,
+      taskKind: this.taskKind,
+      tools: this.tools,
+      onStream,
     });
   }
 }

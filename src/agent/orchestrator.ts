@@ -279,6 +279,34 @@ export class OrchestratorAgent {
     logger?.logEvent(state.id, 'phase_completed', { phase: 'Planning', risk: plan.estimatedRisk });
     planningSpan?.end();
 
+    // --- PONTO DE CONTROLE: APROVAÇÃO DO PLANO ---
+    if (!this.autoApprove) {
+        this.notify({ type: 'message_added', role: 'system', content: 'Aguardando aprovação do plano de execução...' });
+        
+        const approved = await this.liveConfig.humanApprovalCallback?.(
+            { 
+                id: 'plan_approval',
+                toolName: 'Executar Plano',
+                arguments: { 
+                    objetivo: task,
+                    resumo: plan.summary,
+                    fluxos: plan.streams.map(s => `${s.name} (${s.owner})`),
+                    risco: plan.estimatedRisk
+                },
+                timestamp: new Date().toISOString()
+            },
+            'Revisão do plano de execução'
+        );
+
+        if (!approved) {
+            state = AgentStateMachine.fail(postPlanningState, 'Execução cancelada pelo usuário após revisão do plano.');
+            this.notify({ type: 'error', message: 'Execução cancelada pelo usuário.' });
+            orchestratorSpan?.setStatus({ code: 2, message: 'Plan rejected by user' });
+            orchestratorSpan?.end();
+            return { state, plan };
+        }
+    }
+
     this.notify({ type: 'phase_start', phase: 'Execution' });
     logger?.logEvent(state.id, 'phase_started', { phase: 'Execution', streamCount: plan.streams.length });
     const executionSpan = tracing?.startPhaseSpan('Execution', orchestratorSpan);

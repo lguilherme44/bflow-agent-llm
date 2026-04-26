@@ -20,6 +20,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { HookService } from './hook-service.js';
 
 import { SandboxMode } from '../code/sandbox-executor.js';
+import { estimateTokensFromText } from '../utils/json.js';
 
 export interface ReActConfig {
   llm: LLMAdapter;
@@ -33,11 +34,11 @@ export interface ReActConfig {
   executorHooks?: ToolExecutorHooks;
   humanApprovalCallback?: (toolCall: ToolCall, reason: string) => Promise<boolean>;
   humanApprovalPolicy?: (toolCall: ToolCall, state: AgentState) => string | undefined;
-  onUpdate?: (event: { 
-    type: string; 
-    role?: string; 
-    content?: string; 
-    message?: string; 
+  onUpdate?: (event: {
+    type: string;
+    role?: string;
+    content?: string;
+    message?: string;
     usage?: any;
     latencyMs?: number;
     contextWindow?: number;
@@ -121,10 +122,10 @@ export class ReActAgent {
       },
       onPreExecute: async (toolCall) => {
         if (!this.config.hookService) return undefined;
-        
+
         const evaluations = this.config.hookService.evaluate('pre_tool', toolCall.toolName, toolCall.arguments);
         const blocked = this.config.hookService.isBlocked(evaluations);
-        
+
         if (blocked) {
           return {
             toolCallId: toolCall.id,
@@ -139,20 +140,20 @@ export class ReActAgent {
             errorCode: 'CRITICAL_ERROR'
           };
         }
-        
+
         const warnings = evaluations.filter(e => e.action === 'warn');
         for (const warn of warnings) {
           this.config.onUpdate?.({ type: 'message_added', role: 'system', content: `⚠️ AVISO: Regra "${warn.ruleId}" disparada: ${warn.message}` });
         }
-        
+
         return undefined;
       },
       onPostExecute: async (toolCall, result) => {
         if (!this.config.hookService || !result.success) return undefined;
-        
+
         const evaluations = this.config.hookService.evaluate('post_tool', toolCall.toolName, result.data);
         const blocked = this.config.hookService.isBlocked(evaluations);
-        
+
         if (blocked) {
           return {
             toolCallId: toolCall.id,
@@ -167,12 +168,12 @@ export class ReActAgent {
             errorCode: 'CRITICAL_ERROR'
           };
         }
-        
+
         const warnings = evaluations.filter(e => e.action === 'warn');
         for (const warn of warnings) {
           this.config.onUpdate?.({ type: 'message_added', role: 'system', content: `⚠️ AVISO (Pós-ação): Regra "${warn.ruleId}" disparada: ${warn.message}` });
         }
-        
+
         return undefined;
       }
     };
@@ -237,7 +238,7 @@ export class ReActAgent {
             content: 'Você não forneceu nenhuma chamada de ferramenta estruturada em JSON. Relembre o contrato: { "thought": "sua explicação", "tool": "nome_da_ferramenta", "arguments": { ... } }. Se você terminou, use a ferramenta de finalização apropriada (ex: submit_research_brief ou complete_task). Caso contrário, continue usando as ferramentas para progredir.',
             timestamp: new Date().toISOString(),
           });
-          
+
           if (state.metadata.iterationCount >= (this.config.executorConfig?.maxIterations ?? 10)) {
             state = AgentStateMachine.fail(state, 'Máximo de iterações atingido sem conclusão ou uso de ferramentas.');
             break;
@@ -315,13 +316,41 @@ export class ReActAgent {
     try {
       // Injetamos um lembrete de idioma ao final para garantir que o modelo não se perca no contexto
       const languageReminder = "RELEMBRE: Responda SEMPRE em PORTUGUÊS (PT-BR). Use apenas ferramentas e NÃO invente o comando 'final'.";
-      const messagesWithReminder = [...messages, { 
-        role: 'system' as const, 
+      const messagesWithReminder = [...messages, {
+        role: 'system' as const,
         content: languageReminder,
-        timestamp: new Date().toISOString() 
+        timestamp: new Date().toISOString()
       }];
-      
-      const rawResponse = await this.config.llm.complete(messagesWithReminder, this.config.llmConfig);
+
+      let rawResponse: LLMResponse;
+      if (this.config.llm.stream) {
+        let fullContent = '';
+        const startedAt = Date.now();
+        
+        for await (const chunk of this.config.llm.stream(messagesWithReminder, this.config.llmConfig)) {
+          fullContent += chunk;
+          this.config.onUpdate?.({
+            type: 'thought_chunk',
+            content: chunk,
+          });
+        }
+
+        const promptTokens = messagesWithReminder.reduce((acc, m) => acc + estimateTokensFromText(m.content), 0);
+        const completionTokens = estimateTokensFromText(fullContent);
+
+        rawResponse = {
+          content: fullContent,
+          usage: {
+            promptTokens,
+            completionTokens,
+            totalTokens: promptTokens + completionTokens,
+          },
+          latencyMs: Date.now() - startedAt,
+        };
+      } else {
+        rawResponse = await this.config.llm.complete(messagesWithReminder, this.config.llmConfig);
+      }
+
       llmResponse = this.normalizeLLMResponse(rawResponse);
       if (llmSpan) {
         this.config.tracing?.recordLLMUsage(llmSpan, llmResponse.usage);
@@ -334,10 +363,10 @@ export class ReActAgent {
         undefined,
         undefined
       );
-      
+
       // Log event with full content for debugging
-      this.config.logger?.logEvent(state.id, 'llm_content_debug', { 
-        content: llmResponse.content.slice(0, 2000) 
+      this.config.logger?.logEvent(state.id, 'llm_content_debug', {
+        content: llmResponse.content.slice(0, 2000)
       });
 
       if (llmResponse.finishReason === 'length') {
@@ -360,9 +389,9 @@ export class ReActAgent {
       timestamp: new Date().toISOString(),
     });
 
-    this.config.onUpdate?.({ 
-      type: 'message_added', 
-      role: 'assistant', 
+    this.config.onUpdate?.({
+      type: 'message_added',
+      role: 'assistant',
       content: llmResponse.content,
       usage: llmResponse.usage,
       latencyMs: llmResponse.latencyMs,
@@ -377,9 +406,9 @@ export class ReActAgent {
     let next =
       state.status === 'thinking'
         ? AgentStateMachine.dispatch(state, {
-            type: 'tool_call_started',
-            toolCallId: toolCalls[0]?.id,
-          })
+          type: 'tool_call_started',
+          toolCallId: toolCalls[0]?.id,
+        })
         : state;
 
     for (const toolCall of toolCalls) {
@@ -420,22 +449,22 @@ export class ReActAgent {
 
   private verify(state: AgentState): VerificationResult {
     const lastMessage = state.messages.at(-1);
-    const isEmptyResponse = lastMessage?.role === 'assistant' && 
-                            (!lastMessage.content?.trim() || lastMessage.content === 'Processando...') && 
-                            (!lastMessage.toolCalls || lastMessage.toolCalls.length === 0);
+    const isEmptyResponse = lastMessage?.role === 'assistant' &&
+      (!lastMessage.content?.trim() || lastMessage.content === 'Processando...') &&
+      (!lastMessage.toolCalls || lastMessage.toolCalls.length === 0);
 
     if (isEmptyResponse) {
-      const recentEmpty = state.messages.slice(-10).filter(m => 
+      const recentEmpty = state.messages.slice(-10).filter(m =>
         m.role === 'assistant' && (!m.content?.trim() || m.content === 'Processando...') && (!m.toolCalls || m.toolCalls.length === 0)
       ).length;
-      
+
       const correction = "Você retornou uma resposta vazia sem chamar nenhuma ferramenta. Se você concluiu a tarefa, use 'complete_task'. Se precisar de mais informações, use as ferramentas de busca ou leitura.";
       const next = AgentStateMachine.addMessage(state, {
         role: 'system',
         content: correction,
         timestamp: new Date().toISOString(),
       });
-      
+
       if (recentEmpty >= 3) {
         return {
           terminal: true,
@@ -446,12 +475,12 @@ export class ReActAgent {
       return { terminal: false, state: next };
     }
 
-    if (AgentStateMachine.isStuck(state)) {
-      return {
-        terminal: true,
-        state: AgentStateMachine.fail(state, 'Repeated identical tool calls detected'),
-      };
-    }
+    // if (AgentStateMachine.isStuck(state)) {
+    //   return {
+    //     terminal: true,
+    //     state: AgentStateMachine.fail(state, 'Repeated identical tool calls detected'),
+    //   };
+    // }
 
     // Detect failure loops (e.g. the LLM keeps sending empty query to search_text)
     const failureLoop = AgentStateMachine.detectFailureLoop(state);
@@ -612,10 +641,10 @@ export class ReActAgent {
       toolResult: result,
       timestamp: new Date().toISOString(),
     });
-    this.config.onUpdate?.({ 
-      type: 'message_added', 
-      role: 'tool', 
-      content: next.messages.at(-1)?.content || '' 
+    this.config.onUpdate?.({
+      type: 'message_added',
+      role: 'tool',
+      content: next.messages.at(-1)?.content || ''
     });
     return next;
   }

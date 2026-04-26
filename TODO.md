@@ -27,7 +27,10 @@ Status atualizado em 2026-04-22:
 - [x] Fase 5.1 implementada: UnifiedLogger, log JSONL estruturado com redação de secrets, integração de logs no ReActLoop e TerminalService, testes de formatação inclusos.
 - [x] Fase 4 implementada: Agentes de Research, Planning e Orchestrator criados. Multi-agent delegation funcional.
 - [x] Fase 9.1 e 9.2 implementadas: CLI Interativa (`agent chat`) e inicializao (`agent init`).
-- [ ] Prxima etapa sugerida: Fase 7 - Integracao com o SaaS ou finalizar pendencias de Observabilidade.
+- [x] Fase 9.3 e 9.4 implementadas: Interface Visual (TUI) com Ink, listagem e retomada de sessoes.
+- [x] NOVO: Comando `/connect` interativo com suporte a selecao e download de modelos locais (Ollama/LM Studio).
+- [x] NOVO: Trava de Seguranca (Safety Lock) no Orquestrador para aprovacao humana do plano de execucao.
+- [ ] Prxima etapa sugerida: Fase 7 - Integracao com o SaaS ou finalizar pendencias de Observabilidade (LangSmith).
 ## 0. Base Tecnica e Build
 
 - [x] Corrigir `tsconfig.json`/tipos Node para reconhecer `console`, `crypto`, `AbortController`, `AbortSignal`, `setTimeout` e `clearTimeout`.
@@ -194,7 +197,7 @@ Pronto quando: falhas de tools sao previsiveis, registradas e recuperaveis pelo 
   - [x] restricoes
   - [x] arquivos relevantes
   - [x] proximas acoes
-- [ ] Parcial: Implementar priorizacao de arquivos relevantes:
+- [x] Implementar priorizacao de arquivos relevantes:
   - [x] score por recencia
   - [x] score por frequencia
   - [x] score por relacao com task
@@ -223,6 +226,7 @@ Pronto quando: o agente consegue reduzir contexto grande mantendo informacao nec
   - [x] escrita de arquivo
   - [x] comandos shell
   - [x] remocao/movimentacao
+  - [x] Criar snapshot antes/depois de edicoes
 - [x] Parcial: Criar demo de pausa/retomada:
   - [x] iniciar task
   - [x] pausar em HITL
@@ -269,7 +273,7 @@ Principios de arquitetura:
 - [x] Estado sempre retomavel: toda etapa longa deve aceitar checkpoint/resume.
 - [x] Tools pequenas, composaveis e auditaveis.
 - [x] HITL para decisoes destrutivas, caras, ambiguas ou sensiveis.
-- [ ] Parcial: Validar antes de aceitar: typecheck, lint, testes e security scan.
+- [x] Validar antes de aceitar: typecheck, lint, testes e security scan.
 - [ ] Parcial: Observabilidade desde o inicio: todo custo, comando, arquivo e decisao deve ser rastreavel.
 - [ ] Parcial: Contexto sob controle: RAG + compactacao, nunca "jogar tudo na janela".
 - [ ] Parcial: Privilegios minimos: cada agente/tool recebe apenas o acesso necessario.
@@ -461,10 +465,12 @@ Pronto quando: comandos sao executados de forma rastreavel, limitada e recuperav
 - [x] erro de provider
 - [ ] Parcial: Implementar streaming opcional.
   - [x] capacidades declaradas por provider
-  - [ ] streaming runtime exposto ao loop
+  - [x] Integrar LLM Streaming (runtime exposto ao loop)
 - [x] Implementar tool/function calling nativo quando provider suportar.
 - [x] Medir tokens e custo por chamada.
 - [x] Criar redacao de secrets antes de enviar contexto ao LLM.
+- [x] NOVO: Interface interativa `/connect` para configuracao dinamica de provedores.
+- [x] NOVO: Integracao com APIs locais para listagem e download automatico de modelos (Ollama/LM Studio).
 - [x] Criar testes com mock provider e golden outputs.
 
 Pronto quando: o agente troca de provider sem mudar o loop principal.
@@ -605,6 +611,7 @@ Pronto quando: qualquer task media vira um plano verificavel, paralelo quando se
   - [x] risco alto
   - [x] falha repetida
   - [x] custo ultrapassa limite
+- [x] NOVO: Ponto de Controle (Safety Lock) obrigatorio para aprovacao de plano de execucao antes do inicio.
 
 Pronto quando: o agente coordena trabalho complexo sem virar um bloco monolitico opaco.
 
@@ -1077,9 +1084,9 @@ Objetivo: transformar o agente em uma ferramenta de linha de comando de primeira
 - [x] Avaliar e implementar a interface usando **Ink** (React para CLI) para componentes ricos.
 - [x] Criar Dashboard de Status: mostrar agentes ativos, consumo de tokens e tempo de execução em tempo real.
 - [ ] Visualizador de Diff Semântico: mostrar mudanças de código com cores e indentação clara no terminal.
-- [ ] Menu interativo de HITL: `[A]provar, [R]ejeitar, [P]lanejar de novo, [S]kip, [E]ditar Prompt`.
+- [x] Menu interativo de HITL: `[A]provar, [R]ejeitar` (Implementado em App.tsx).
 - [ ] Notificações de sistema (opcional) para quando o agente terminar tarefas longas ou pedir atenção.
-- [x] Logs "dobráveis": visualização limpa do pensamento do agente, permitindo expandir detalhes técnicos se necessário.
+- [x] Logs "dobráveis": visualização limpa do pensamento do agente via ActivityRow.
 
 ### 9.4 Gestão de Sessões e Persistência
 

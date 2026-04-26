@@ -12,6 +12,7 @@ import { runRepl } from './cli/repl.js';
 import path from 'node:path';
 import picocolors from 'picocolors';
 import { loadEnv } from './utils/env.js';
+import { loadConfig } from './utils/config.js';
 
 loadEnv();
 
@@ -20,7 +21,8 @@ const program = new Command();
 program
   .name('agent')
   .description('Checkpointable ReAct coding agent CLI')
-  .version('1.0.0');
+  .version('1.0.0')
+  .option('-p, --provider <name>', 'Provider LLM (openai, anthropic, lmstudio, ollama)', 'lmstudio');
 
 // Helper to setup the orchestrator
 async function setupOrchestrator(options: any) {
@@ -33,15 +35,19 @@ async function setupOrchestrator(options: any) {
   const logger = new UnifiedLogger({ logDirectory: path.join(agentDir, 'logs') });
 
   // Resolve Provider
+  const config = loadConfig(workspaceRoot);
   let provider;
-  const providerName = options.provider || process.env.AGENT_LLM_PROVIDER || 'lmstudio';
+  const providerName = options.provider || config.provider || process.env.AGENT_LLM_PROVIDER || 'lmstudio';
   
   if (providerName === 'lmstudio') {
-    provider = new LMStudioProvider();
+    provider = new LMStudioProvider({
+      baseUrl: config.baseUrl || process.env.AGENT_LLM_BASE_URL,
+      defaultModel: config.model || process.env.AGENT_LLM_MODEL
+    });
   } else if (providerName === 'ollama') {
     provider = new OllamaProvider({
-      defaultModel: process.env.AGENT_LLM_MODEL,
-      baseUrl: process.env.AGENT_LLM_BASE_URL
+      defaultModel: config.model || process.env.AGENT_LLM_MODEL,
+      baseUrl: config.baseUrl || process.env.AGENT_LLM_BASE_URL
     });
   } else {
     provider = providerFromEnv(providerName as any);
@@ -62,13 +68,23 @@ async function setupOrchestrator(options: any) {
     contextManager,
     logger,
     humanApprovalCallback: async (toolCall) => {
-      console.log(picocolors.yellow(`\n[HITL] Aprovacao necessaria para: ${picocolors.bold(toolCall.toolName)}`));
-      console.log(picocolors.dim(`Argumentos: ${JSON.stringify(toolCall.arguments, null, 2)}`));
-      return true; // Auto-approve for CLI for now, but in a real scenario we'd ask.
+      console.log(picocolors.yellow(`\n[HITL] Aprovação necessária para: ${picocolors.bold(toolCall.toolName)}`));
+      console.log(picocolors.white(`Argumentos: ${JSON.stringify(toolCall.arguments, null, 2)}`));
+      
+      const rl = (await import('node:readline/promises')).createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+      
+      const answer = await rl.question(picocolors.cyan('Aprovar execução? (s/n): '));
+      rl.close();
+      
+      return answer.toLowerCase() === 's';
     },
     llmConfig: {
       model: provider.defaultModel,
-      temperature: 0.2
+      temperature: config.temperature ?? 0.2,
+      maxTokens: config.maxTokens ?? 2048
     }
   });
 
@@ -104,7 +120,7 @@ program
   .command('list')
   .description('Lista as sessoes e checkpoints salvos')
   .action(async () => {
-    const { checkpointManager } = await setupOrchestrator({});
+    const { checkpointManager } = await setupOrchestrator(program.opts());
     const checkpoints = await checkpointManager.list();
     if (checkpoints.length === 0) {
       console.log('Nenhum checkpoint encontrado.');
@@ -121,22 +137,24 @@ program
 program
   .command('chat')
   .description('Inicia um chat interativo (REPL) com o agente')
-  .option('-p, --provider <name>', 'Provider LLM (openai, anthropic, lmstudio, ollama)', 'lmstudio')
   .argument('[task...]', 'Tarefa inicial opcional')
   .action(async (taskArgs, options) => {
     const task = taskArgs.join(' ');
-    const { orchestrator } = await setupOrchestrator(options);
-    await runRepl(orchestrator, task || undefined);
+    const { orchestrator } = await setupOrchestrator({ ...program.opts(), ...options });
+    await runRepl(orchestrator, task || undefined, async () => {
+      const { orchestrator: newOrchestrator } = await setupOrchestrator({ ...program.opts(), ...options });
+      return newOrchestrator;
+    });
+
   });
 
 program
   .command('run')
   .description('Executa uma tarefa unica (one-shot)')
-  .option('-p, --provider <name>', 'Provider LLM', 'lmstudio')
   .argument('<task...>', 'Descricao da tarefa')
   .action(async (taskArgs, options) => {
     const task = taskArgs.join(' ');
-    const { orchestrator } = await setupOrchestrator(options);
+    const { orchestrator } = await setupOrchestrator({ ...program.opts(), ...options });
     console.log(picocolors.cyan(`Executando tarefa: ${task}`));
     await orchestrator.run(task);
   });
@@ -144,10 +162,9 @@ program
 program
   .command('resume')
   .description('Retoma uma sessao a partir de um ID')
-  .option('-p, --provider <name>', 'Provider LLM', 'lmstudio')
   .argument('<id>', 'ID da sessao')
   .action(async (id, options) => {
-    const { orchestrator, checkpointManager } = await setupOrchestrator(options);
+    const { orchestrator, checkpointManager } = await setupOrchestrator({ ...program.opts(), ...options });
     const state = await checkpointManager.resumeFromCheckpoint(id);
     if (!state) {
       console.error(picocolors.red(`Erro: Sessao ${id} nao encontrada.`));

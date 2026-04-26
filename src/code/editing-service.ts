@@ -7,6 +7,7 @@ import { AstGrepService } from './ast-grep-service.js';
 import { TreeSitterParserService } from './tree-sitter-parser.js';
 import { TypeScriptLanguageService } from './typescript-language-service.js';
 import { RiskPolicyEngine } from '../utils/risk-engine.js';
+import { SnapshotService } from '../utils/snapshot.js';
 
 export class CodeEditingService {
   private readonly plans = new Map<string, EditPlan>();
@@ -16,7 +17,8 @@ export class CodeEditingService {
     private readonly parser = new TreeSitterParserService(),
     private readonly astGrep = new AstGrepService(),
     private readonly tsService = new TypeScriptLanguageService(workspaceRoot),
-    private readonly riskEngine = new RiskPolicyEngine()
+    private readonly riskEngine = new RiskPolicyEngine(),
+    private readonly snapshotService = new SnapshotService(workspaceRoot)
   ) {}
 
   async readFileWithAst(filepath: string): Promise<CodeDocument> {
@@ -126,6 +128,7 @@ export class CodeEditingService {
 
     for (const file of plan.filesModified) {
       const before = await readFile(file, 'utf8');
+      await this.snapshotService.createSnapshot(file, before);
       const after = applyTextPatches(before, plan.patches.filter((patch) => patch.filepath === file));
       const formatted = this.formatIfNeeded(file, after);
       await writeFile(file, formatted, 'utf8');
@@ -171,6 +174,18 @@ export class CodeEditingService {
     }
 
     const resolved = assertInsideWorkspace(this.workspaceRoot, filepath);
+    
+    let before: string | undefined;
+    try {
+      before = await readFile(resolved, 'utf8');
+    } catch {
+      // File doesn't exist, no snapshot needed
+    }
+
+    if (before !== undefined) {
+      await this.snapshotService.createSnapshot(resolved, before);
+    }
+
     await mkdir(path.dirname(resolved), { recursive: true });
     const finalContent = this.formatIfNeeded(resolved, content);
     this.parser.parseText(resolved, finalContent);

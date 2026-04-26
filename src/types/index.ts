@@ -268,6 +268,7 @@ export interface LLMProviderRequest {
   taskKind: LLMTaskKind;
   tools?: ToolSchema[];
   signal?: AbortSignal;
+  onStream?: (chunk: string) => void;
 }
 
 export interface LLMProviderResponse extends LLMResponse {
@@ -288,6 +289,7 @@ export interface LLMProvider {
   defaultModel: string;
   capabilities: LLMProviderCapabilities;
   complete(request: LLMProviderRequest): Promise<LLMProviderResponse>;
+  stream?(request: LLMProviderRequest): AsyncIterable<string>;
 }
 
 export interface LLMRouterPolicy {
