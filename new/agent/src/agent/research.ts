@@ -79,7 +79,7 @@ export class ResearchAgent {
           `\n- LOOP: Não leia o mesmo arquivo repetidamente. Se entendeu o conteúdo, finalize.` +
           `\n- VAZIO: Se não houver nada relevante, finalize IMEDIATAMENTE.` +
           `\n</rules>` +
-          `\n\n<workflow>\n1. list_files/git_status\n2. read_file/search_text\n3. submit_research_brief (FIM)\n</workflow>`
+          `\n<workflow>\n1. list_files/git_status\n2. retrieve_context (arquivos grandes) ou read_file (arquivos pequenos)\n3. submit_research_brief (FIM)\n</workflow>`
       }
     });
   }

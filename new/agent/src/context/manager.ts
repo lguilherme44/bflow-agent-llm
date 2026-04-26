@@ -238,7 +238,7 @@ export class ContextManager {
         return message;
       }
 
-      const isRecent = index >= messages.length - 4;
+      const isRecent = index >= messages.length - 10;
       const isError = !message.toolResult.success;
       if (isRecent || isError) {
         return message;

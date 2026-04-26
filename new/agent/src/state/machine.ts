@@ -277,26 +277,32 @@ export class AgentStateMachine {
     }
   }
 
-  static isStuck(state: AgentState, windowSize = 5): boolean {
+  static isStuck(state: AgentState, windowSize = 10): boolean {
     const recent = state.toolHistory.slice(-windowSize);
-    if (recent.length < windowSize) {
+    if (recent.length < 4) {
       return false;
     }
 
     const calls = recent.map((entry) => `${entry.call.toolName}:${JSON.stringify(entry.call.arguments)}`);
-    if (new Set(calls).size !== 1) {
-      return false;
+    
+    // Contagem de frequencia de chamadas identicas
+    const counts: Record<string, number> = {};
+    for (const call of calls) {
+      counts[call] = (counts[call] ?? 0) + 1;
+      if (counts[call] >= 3) {
+        // Se a mesma ferramenta com mesmos argumentos foi chamada 3 vezes nas ultimas 10 acoes,
+        // consideramos que o agente esta em loop (ping-pong ou consecutivo).
+        
+        // Excecao: chamadas que falharam podem ser repetidas para tentativa de recuperacao
+        // ate o limite do detectFailureLoop. Aqui focamos em sucesso repetido sem progresso.
+        const callEntries = recent.filter(e => `${e.call.toolName}:${JSON.stringify(e.call.arguments)}` === call);
+        if (callEntries.some(e => e.result.success)) {
+          return true;
+        }
+      }
     }
 
-    // If ALL repeated calls are failures (e.g. validation errors), 
-    // the model needs better guidance, not a hard stop.
-    const allFailed = recent.every((entry) => !entry.result.success);
-    if (allFailed) {
-      return false;
-    }
-
-    // Truly stuck: same call repeated and at least some succeeded
-    return true;
+    return false;
   }
 
   /**
