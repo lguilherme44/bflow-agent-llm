@@ -93,9 +93,10 @@ export class TerminalService {
     const span = this.config.tracing?.startTerminalSpan(normalizedCommand, resolvedCwd);
 
     return new Promise((resolve) => {
+      const isWindows = process.platform === 'win32';
       const child = spawn(executable, args, {
         cwd: resolvedCwd,
-        shell: false,
+        shell: isWindows,
         windowsHide: true,
       });
 

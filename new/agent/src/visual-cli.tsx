@@ -10,11 +10,15 @@ import { UnifiedLogger } from './observability/logger.js';
 import { CheckpointManager, FileCheckpointStorage } from './state/checkpoint.js';
 import { createDevelopmentToolRegistry } from './tools/development-tools.js';
 import { App } from './ui/App.js';
+import { loadEnv } from './utils/env.js';
+
+// Load environment variables from .env file manually
+loadEnv();
 
 type ProviderName = 'openai' | 'anthropic' | 'openrouter' | 'lmstudio' | 'ollama';
 
 function resolveProviderName(args: string[]): ProviderName {
-  let fallbackProvider: ProviderName = 'lmstudio';
+  let fallbackProvider: ProviderName = (process.env.AGENT_LLM_PROVIDER as ProviderName) || 'lmstudio';
 
   if (process.env.OPENAI_API_KEY) {
     fallbackProvider = 'openai';
@@ -48,7 +52,10 @@ function resolveProvider(providerName: ProviderName) {
   }
 
   if (providerName === 'ollama') {
-    return new OllamaProvider();
+    return new OllamaProvider({
+      defaultModel: process.env.AGENT_LLM_MODEL,
+      baseUrl: process.env.AGENT_LLM_BASE_URL
+    });
   }
 
   return providerFromEnv(providerName);
@@ -135,7 +142,13 @@ async function main() {
   });
 
   const { waitUntilExit } = render(
-    <App orchestrator={orchestrator} initialTask={initialTask} initialState={initialState} />
+    <App 
+      orchestrator={orchestrator} 
+      initialTask={initialTask} 
+      initialState={initialState} 
+      modelName={provider.defaultModel}
+      providerName={providerName}
+    />
   );
 
   await waitUntilExit();

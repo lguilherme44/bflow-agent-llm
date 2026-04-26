@@ -198,9 +198,7 @@ export class MockLLMAdapter implements LLMAdapter {
     }
 
     return JSON.stringify({
-      thought: 'I should inspect the project before acting.',
-      tool: 'read_file',
-      arguments: { filepath: './src/index.ts' },
+      thought: 'I am continuing my thoughts without a specific action yet.',
     });
   }
 

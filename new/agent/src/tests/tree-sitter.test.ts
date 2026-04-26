@@ -1,19 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { TreeSitterParserService } from '../code/tree-sitter-parser.js';
+
+const FIXTURES_DIR = path.resolve(process.cwd(), 'tests', 'fixtures', 'code-samples');
+
+function readFixture(filename: string): string {
+  return readFileSync(path.join(FIXTURES_DIR, filename), 'utf8');
+}
 
 test('Tree-sitter Fixtures - TypeScript', () => {
   const parser = new TreeSitterParserService();
-  const code = `
-    import { x } from "./mod";
-    export interface Data { id: number }
-    export class Service {
-      async execute(data: Data): Promise<void> {
-        console.log(data.id);
-      }
-    }
-    const internal = () => { return 1; };
-  `;
+  const code = readFixture('sample.ts');
   const doc = parser.parseText('test.ts', code);
   
   assert.equal(doc.language, 'typescript');
@@ -24,40 +23,19 @@ test('Tree-sitter Fixtures - TypeScript', () => {
 
 test('Tree-sitter Fixtures - TSX (React)', () => {
   const parser = new TreeSitterParserService();
-  const code = `
-    import React, { useState, useEffect } from 'react';
-    
-    export const MyComponent = ({ title }: { title: string }) => {
-      const [count, setCount] = useState(0);
-      
-      useEffect(() => {
-        console.log("mounted");
-      }, []);
-
-      return <div onClick={() => setCount(c => c + 1)}>{title}: {count}</div>;
-    };
-  `;
+  const code = readFixture('sample.tsx');
   const doc = parser.parseText('test.tsx', code);
   
   assert.equal(doc.language, 'tsx');
-  // Check for component (arrow function)
   assert.ok(doc.symbols.some(s => s.kind === 'arrow_function' && s.name === 'MyComponent'), 'Should find component');
-  // Check for hooks
   assert.ok(doc.symbols.some(s => s.kind === 'hook' && s.name === 'useState'), 'Should find useState');
   assert.ok(doc.symbols.some(s => s.kind === 'hook' && s.name === 'useEffect'), 'Should find useEffect');
-  // Check for JSX
   assert.ok(doc.symbols.some(s => s.kind === 'jsx_element'), 'Should find JSX element');
 });
 
 test('Tree-sitter Fixtures - JavaScript', () => {
   const parser = new TreeSitterParserService();
-  const code = `
-    const { log } = require('console');
-    function legacy(a, b) {
-      return a + b;
-    }
-    module.exports = { legacy };
-  `;
+  const code = readFixture('sample.js');
   const doc = parser.parseText('test.js', code);
   assert.equal(doc.language, 'javascript');
   assert.ok(doc.symbols.some(s => s.kind === 'function' && s.name === 'legacy'), 'Should find function');
@@ -65,15 +43,7 @@ test('Tree-sitter Fixtures - JavaScript', () => {
 
 test('Tree-sitter Fixtures - JSON', () => {
   const parser = new TreeSitterParserService();
-  const code = `
-    {
-      "name": "agent",
-      "version": "1.0.0",
-      "config": {
-        "enabled": true
-      }
-    }
-  `;
+  const code = readFixture('sample.json');
   const doc = parser.parseText('test.json', code);
   assert.equal(doc.language, 'json');
   assert.ok(doc.symbols.some(s => s.kind === 'json_property' && s.name === 'name'), 'Should find name property');

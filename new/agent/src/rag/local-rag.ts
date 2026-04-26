@@ -13,6 +13,7 @@ import { estimateTokensFromText } from '../utils/json.js';
 import lunr from 'lunr';
 import { RankingUtils } from './ranking-utils.js';
 import { LanceDBStore } from './lancedb-store.js';
+import { EmbeddingProvider, TfIdfEmbeddingProvider, OllamaEmbeddingProvider } from './embeddings.js';
 
 export interface RetrieveContextInput {
   task: string;
@@ -38,9 +39,25 @@ export class LocalRagService {
 
   constructor(
     private readonly workspaceRoot = process.cwd(),
-    private readonly parser = new TreeSitterParserService()
+    private readonly parser = new TreeSitterParserService(),
+    embeddingProvider?: EmbeddingProvider
   ) {
-    this.vectorStore = new LanceDBStore(workspaceRoot);
+    const provider = embeddingProvider || this.resolveDefaultProvider();
+    this.vectorStore = new LanceDBStore(workspaceRoot, provider);
+  }
+
+  private resolveDefaultProvider(): EmbeddingProvider {
+    const type = process.env.EMBEDDING_PROVIDER || 'tf-idf';
+    
+    if (type === 'ollama') {
+      return new OllamaEmbeddingProvider(
+        768,
+        process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text',
+        process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
+      );
+    }
+
+    return new TfIdfEmbeddingProvider();
   }
 
   async indexWorkspace(directory = '.'): Promise<RagIndexStats> {
@@ -124,16 +141,19 @@ export class LocalRagService {
     const lexicalResults = this.lexicalSearch(input.task, input.filters);
 
     // 2. Recency Ranking
-    const recencyResults = this.recencyRank(filteredChunks);
+    const recencyResults = this.recencyRank(filteredChunks).slice(0, 20);
 
     // 3. Centrality Ranking
-    const centralityResults = this.centralityRank(filteredChunks);
+    const centralityResults = this.centralityRank(filteredChunks).slice(0, 20);
 
     // 4. Vector Search (LanceDB)
     const vectorResults = await this.vectorSearch(input.task, input.filters, limit * 2);
 
-    // 5. Combine with RRF
-    const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults, vectorResults]);
+    // 5. Filename Match Ranking
+    const filenameResults = this.filenameRank(filteredChunks, input.task);
+
+    // 6. Combine with RRF
+    const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults, vectorResults, filenameResults]);
 
     return combined.slice(0, limit).map(({ item, score }) => {
       const reasons: string[] = [];
@@ -141,8 +161,67 @@ export class LocalRagService {
       if (recencyResults.slice(0, 10).includes(item)) reasons.push('recent file');
       if (centralityResults.slice(0, 10).includes(item)) reasons.push('structural centrality');
       if (vectorResults.includes(item)) reasons.push('vector similarity');
+      if (filenameResults.slice(0, 5).includes(item)) reasons.push('filename match');
 
       return { chunk: item, score, reasons };
+    });
+  }
+
+  /**
+   * Reranks retrieval results using a more expensive semantic comparison.
+   * Currently uses a boosted symbol match, but can be extended to use an LLM.
+   */
+  async rerankResults(results: RetrievalResult[], query: string): Promise<RetrievalResult[]> {
+    if (results.length <= 1) return results;
+
+    const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 3);
+    
+    return RankingUtils.rerank(
+      results.map(r => ({ item: r, score: r.score })),
+      query,
+      async (res) => {
+        let boost = res.score;
+        
+        // Semantic boost: if query terms appear in chunk symbols
+        for (const term of terms) {
+          if (res.chunk.metadata.symbols.some(s => s.toLowerCase().includes(term))) {
+            boost += 0.2;
+          }
+        }
+
+        // Penalty for too many tokens if not highly relevant
+        if (res.chunk.tokensEstimate > 1000 && boost < 0.5) {
+          boost -= 0.1;
+        }
+
+        return boost;
+      }
+    ).then(items => items.map(i => i.item));
+  }
+
+  /**
+   * Compresses retrieved chunks by extracting only the most relevant parts
+   * or summarizing them. (Placeholder for LLM-based compression).
+   */
+  async compressResults(results: RetrievalResult[]): Promise<RetrievalResult[]> {
+    return results.map(res => {
+      if (res.chunk.content.length < 1000) return res;
+
+      // Simple heuristic compression: keep first 500 and last 500 chars if large
+      // In a real scenario, this would call an LLM to summarize.
+      const compressedContent = res.chunk.content.length > 2000
+        ? res.chunk.content.slice(0, 800) + '\n\n[...]\n\n' + res.chunk.content.slice(-800)
+        : res.chunk.content;
+
+      return {
+        ...res,
+        chunk: {
+          ...res.chunk,
+          content: compressedContent,
+          tokensEstimate: estimateTokensFromText(compressedContent)
+        },
+        reasons: [...res.reasons, 'compressed']
+      };
     });
   }
 
@@ -159,16 +238,18 @@ export class LocalRagService {
     if (filteredChunks.length === 0) return [];
 
     const lexicalResults = this.lexicalSearch(input.task, input.filters);
-    const recencyResults = this.recencyRank(filteredChunks);
-    const centralityResults = this.centralityRank(filteredChunks);
+    const recencyResults = this.recencyRank(filteredChunks).slice(0, 20);
+    const centralityResults = this.centralityRank(filteredChunks).slice(0, 20);
+    const filenameResults = this.filenameRank(filteredChunks, input.task);
 
-    const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults]);
+    const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults, filenameResults]);
     
     return combined.slice(0, limit).map(({ item, score }) => {
       const reasons: string[] = [];
       if (lexicalResults.includes(item)) reasons.push('lexical match');
       if (recencyResults.slice(0, 10).includes(item)) reasons.push('recent file');
       if (centralityResults.slice(0, 10).includes(item)) reasons.push('structural centrality');
+      if (filenameResults.slice(0, 5).includes(item)) reasons.push('filename match');
       
       return { chunk: item, score, reasons };
     });
@@ -206,6 +287,30 @@ export class LocalRagService {
       const scoreB = (b.metadata.owner === 'src' ? 10 : 0) + b.metadata.symbols.length;
       return scoreB - scoreA;
     });
+  }
+
+  private filenameRank(chunks: RetrievalChunk[], query: string): RetrievalChunk[] {
+    const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 2);
+    if (terms.length === 0) return [];
+
+    return chunks
+      .filter(chunk => {
+        const filepath = chunk.metadata.filepath.toLowerCase();
+        return terms.some(term => filepath.includes(term));
+      })
+      .sort((a, b) => {
+        const filepathA = a.metadata.filepath.toLowerCase();
+        const filepathB = b.metadata.filepath.toLowerCase();
+        
+        // Count how many terms match in the path
+        const matchesA = terms.filter(t => filepathA.includes(t)).length;
+        const matchesB = terms.filter(t => filepathB.includes(t)).length;
+        
+        if (matchesB !== matchesA) return matchesB - matchesA;
+        
+        // Tie-breaker: shorter path (usually more "root" or direct)
+        return filepathA.length - filepathB.length;
+      });
   }
 
   private async vectorSearch(

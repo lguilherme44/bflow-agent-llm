@@ -5,12 +5,15 @@ import { MockLLMAdapter } from '../llm/adapter.js';
 import { ContextManager } from '../context/manager.js';
 import { createDevelopmentToolRegistry } from '../tools/development-tools.js';
 import { CheckpointManager, FileCheckpointStorage } from '../state/checkpoint.js';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 test('OrchestratorAgent executes research, planning, and delegates execution', async () => {
   const workspace = await mkdtemp(path.join(tmpdir(), 'agent-planning-'));
+  await writeFile(path.join(workspace, 'package.json'), JSON.stringify({ scripts: { build: 'echo 1', lint: 'echo 1', test: 'echo 1' } }));
+  await mkdir(path.join(workspace, 'src'), { recursive: true });
+  await writeFile(path.join(workspace, 'src', 'index.ts'), 'console.log(1);');
   
   try {
     const registry = createDevelopmentToolRegistry({ workspaceRoot: workspace });

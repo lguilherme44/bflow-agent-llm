@@ -1,0 +1,7 @@
+{
+  "provider": "openai",
+  "model": "gpt-5.4-mini",
+  "temperature": 0.2,
+  "maxTokens": 2048,
+  "sandbox": "auto"
+}

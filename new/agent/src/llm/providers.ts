@@ -270,10 +270,47 @@ export class OllamaProvider extends OpenAIProvider {
   constructor(config?: Partial<HttpProviderConfig>) {
     super({
       name: 'ollama',
-      baseUrl: 'http://localhost:11434/v1/chat/completions',
+      baseUrl: 'http://localhost:11434',
       defaultModel: 'llama3',
       ...config,
     });
+  }
+
+  protected override endpoint(): string {
+    const base = this.config.baseUrl.replace(/\/$/, '');
+    if (base.endsWith('/api/chat')) return base;
+    return `${base}/api/chat`;
+  }
+
+  protected override body(request: LLMProviderRequest, model: string): Record<string, unknown> {
+    return {
+      model,
+      messages: this.normalizeMessages(request.messages),
+      stream: false,
+      options: {
+        temperature: request.config?.temperature ?? 0.2,
+        num_predict: request.config?.maxTokens,
+      },
+    };
+  }
+
+  protected override extractContent(payload: Record<string, unknown>): string {
+    const message = payload.message as { content?: string } | undefined;
+    return message?.content ?? '';
+  }
+
+  protected override extractUsage(payload: Record<string, unknown>): LLMProviderResponse['usage'] {
+    const promptTokens = (payload.prompt_eval_count as number) ?? 0;
+    const completionTokens = (payload.eval_count as number) ?? 0;
+    return {
+      promptTokens,
+      completionTokens,
+      totalTokens: promptTokens + completionTokens,
+    };
+  }
+
+  protected override extractFinishReason(payload: Record<string, unknown>): LLMResponse['finishReason'] {
+    return payload.done ? 'stop' : 'other';
   }
 
   readonly capabilities = {

@@ -16,6 +16,8 @@ interface AppProps {
   orchestrator: OrchestratorAgent;
   initialTask?: string;
   initialState?: any; // AgentState
+  modelName?: string;
+  providerName?: string;
 }
 
 interface DisplayMessage {
@@ -242,7 +244,7 @@ const ActivityRow = memo(({ message, width }: { message: DisplayMessage; width: 
 
 ActivityRow.displayName = 'ActivityRow';
 
-export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) => {
+export const App = ({ orchestrator, initialTask = '', initialState, modelName, providerName }: AppProps) => {
   const { stdout } = useStdout();
   const { exit } = useApp();
 
@@ -283,6 +285,7 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
   const [pendingApproval, setPendingApproval] = useState<PendingApprovalState | null>(null);
   const [lastEventAt, setLastEventAt] = useState<string | null>(initialState ? nowLabel() : null);
   const [hasAutoStarted, setHasAutoStarted] = useState(false);
+  const [isAutonomous, setIsAutonomous] = useState(false);
 
   const deferredMessages = useDeferredValue(messages);
   const deferredFinalResult = useDeferredValue(finalResult);
@@ -453,6 +456,13 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
       return;
     }
 
+    if (input === 'g' || input === 'G') {
+      const nextMode = !isAutonomous;
+      setIsAutonomous(nextMode);
+      orchestrator.setAutoApprove(nextMode);
+      return;
+    }
+
     if (!pendingApproval) {
       return;
     }
@@ -497,9 +507,20 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
         marginBottom={1}
       >
         <Box flexDirection="column">
-          <Text bold color="cyan">
-            Agent Control Center
-          </Text>
+          <Box alignItems="center">
+            <Text bold color="cyan">
+              Agent Control Center
+            </Text>
+            {modelName && (
+              <Box marginLeft={2}>
+                <Text dimColor>[</Text>
+                <Text color="green" bold>{providerName?.toUpperCase()}</Text>
+                <Text dimColor>:</Text>
+                <Text color="yellow">{modelName}</Text>
+                <Text dimColor>]</Text>
+              </Box>
+            )}
+          </Box>
           <Text dimColor>Interface operacional para execucao assistida de tarefas.</Text>
         </Box>
         <Box
@@ -507,7 +528,14 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
           alignItems={compactLayout ? 'flex-start' : 'flex-end'}
           marginTop={compactLayout ? 1 : 0}
         >
-          <StatusBadge status={status} />
+          <Box marginBottom={1}>
+            <StatusBadge status={status} />
+            {isAutonomous && (
+              <Box marginLeft={1}>
+                <Text color="white" backgroundColor="red" bold> AUTONOMO </Text>
+              </Box>
+            )}
+          </Box>
           <Text dimColor>{lastEventAt ? `Atualizado as ${lastEventAt}` : 'Sessao pronta'}</Text>
         </Box>
       </Box>
@@ -689,7 +717,7 @@ export const App = ({ orchestrator, initialTask = '', initialState }: AppProps) 
               placeholder="Descreva a proxima tarefa e pressione Enter"
             />
           </Box>
-          <Text dimColor>Enter executa a tarefa atual. Ctrl+C encerra a interface.</Text>
+          <Text dimColor>Enter executa a tarefa atual. [G] Alternar Autonomo. Ctrl+C encerra a interface.</Text>
         </Box>
       )}
     </Box>

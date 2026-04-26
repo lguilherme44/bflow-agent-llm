@@ -221,17 +221,17 @@ export class ReActAgent {
           break;
         }
 
-        const verification = this.verify(state);
-        state = verification.state;
-        await this.config.checkpointManager.checkpoint(state);
-        if (verification.terminal) {
-          break;
-        }
 
         const toolCalls = response.llmResponse.toolCalls ?? [];
         if (toolCalls.length === 0) {
           // Instead of auto-completing, we warn the model that it must use a tool or complete_task.
           // This prevents "lazy" models or conversational models from finishing prematurely.
+          const verification = this.verify(state);
+          state = verification.state;
+          if (verification.terminal) {
+            await this.config.checkpointManager.checkpoint(state);
+            break;
+          }
           state = AgentStateMachine.addMessage(state, {
             role: 'system',
             content: 'Você não forneceu nenhuma chamada de ferramenta estruturada em JSON. Relembre o contrato: { "thought": "sua explicação", "tool": "nome_da_ferramenta", "arguments": { ... } }. Se você terminou, use a ferramenta de finalização apropriada (ex: submit_research_brief ou complete_task). Caso contrário, continue usando as ferramentas para progredir.',
@@ -242,13 +242,17 @@ export class ReActAgent {
             state = AgentStateMachine.fail(state, 'Máximo de iterações atingido sem conclusão ou uso de ferramentas.');
             break;
           }
-          
           await this.config.checkpointManager.checkpoint(state);
           continue;
         }
 
         state = await this.act(state, toolCalls);
+        const verification = this.verify(state);
+        state = verification.state;
         await this.config.checkpointManager.checkpoint(state);
+        if (verification.terminal) {
+          break;
+        }
 
         if (state.status === 'awaiting_human') {
           return state;
@@ -421,19 +425,16 @@ export class ReActAgent {
                             (!lastMessage.toolCalls || lastMessage.toolCalls.length === 0);
 
     if (isEmptyResponse) {
-      // If the LLM returns nothing, it's often stuck or context is full.
-      // We'll treat this as a failure loop to trigger a correction or termination.
+      const recentEmpty = state.messages.slice(-10).filter(m => 
+        m.role === 'assistant' && (!m.content?.trim() || m.content === 'Processando...') && (!m.toolCalls || m.toolCalls.length === 0)
+      ).length;
+      
       const correction = "Você retornou uma resposta vazia sem chamar nenhuma ferramenta. Se você concluiu a tarefa, use 'complete_task'. Se precisar de mais informações, use as ferramentas de busca ou leitura.";
       const next = AgentStateMachine.addMessage(state, {
         role: 'system',
         content: correction,
         timestamp: new Date().toISOString(),
       });
-      
-      // If it repeats 3 times, fail the task
-      const recentEmpty = state.messages.slice(-10).filter(m => 
-        m.role === 'assistant' && !m.content?.trim() && (!m.toolCalls || m.toolCalls.length === 0)
-      ).length;
       
       if (recentEmpty >= 3) {
         return {
@@ -660,19 +661,28 @@ export class ReActAgent {
     const currentContext = `### CONTEXTO TEMPORAL\n- Hoje é ${dayName}, ${dateStr}\n- Hora atual: ${timeStr}`;
 
     return [
-      'You are a ReAct software engineering agent.',
+      'Você é um agente de engenharia de software ReAct de elite.',
       currentContext,
-      'Cycle contract: observe context, think with a short JSON action, act with tools, verify the result.',
-      'CRITICAL: You must ALWAYS respond with a JSON object. If you want to "think", include a "thought" field inside the JSON.',
-      'JSON Structure example:',
+      'CONTRATO DE CICLO: Observe o contexto, PENSE em um JSON de ação curta, ATUE com ferramentas, VERIFIQUE o resultado.',
+      '### REGRAS CRÍTICAS DE RESPOSTA:',
+      '1. Sua resposta DEVE ser ÚNICA e EXCLUSIVAMENTE um objeto JSON válido.',
+      '2. NÃO inclua saudações, explicações ou conversas fora do JSON.',
+      '3. TODO o seu raciocínio deve estar dentro do campo "thought".',
+      '4. Se você terminou a tarefa, use obrigatoriamente "complete_task".',
+      '5. Se precisar de informações, use ferramentas de busca como "list_files" ou "search_text".',
+      '',
+      '### FORMATO JSON EXIGIDO:',
       '```json',
-      '{ "thought": "Brief explanation", "tool": "tool_name", "arguments": { ... } }',
+      '{',
+      '  "thought": "Breve explicação do que você vai fazer agora",',
+      '  "tool": "nome_da_ferramenta",',
+      '  "arguments": { "arg1": "valor" }',
+      '}',
       '```',
-      'Use complete_task when the task is done. If tool JSON is invalid, correct it on the next turn.',
-      'Prefer AST-first code edits and request human approval for destructive, broad or sensitive actions.',
+      '',
       this.config.registry.generateToolPrompt(),
       this.buildPersonaPrompt(),
-      '\nIMPORTANT: Always respond in the SAME LANGUAGE as the user\'s prompt. If the user asks in Portuguese, you MUST answer in Portuguese.',
+      '\nIMPORTANTE: Responda SEMPRE em PORTUGUÊS (PT-BR). O campo "thought" deve estar em português.',
     ].join('\n\n');
   }
 

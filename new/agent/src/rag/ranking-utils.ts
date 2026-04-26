@@ -39,4 +39,22 @@ export class RankingUtils {
     if (max === min) return scores.map(() => 1.0);
     return scores.map((s) => (s - min) / (max - min));
   }
+
+  /**
+   * Simple semantic reranker placeholder.
+   * In a real scenario, this would call an LLM or a Cross-Encoder.
+   */
+  static async rerank<T>(
+    items: Array<ScoredItem<T>>,
+    query: string,
+    ranker: (item: T, query: string) => Promise<number>
+  ): Promise<Array<ScoredItem<T>>> {
+    const reranked = await Promise.all(
+      items.map(async (si) => ({
+        item: si.item,
+        score: await ranker(si.item, query),
+      }))
+    );
+    return reranked.sort((a, b) => b.score - a.score);
+  }
 }

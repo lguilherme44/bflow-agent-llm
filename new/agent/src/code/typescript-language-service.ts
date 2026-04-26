@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
 import { CodeDiagnostic, SourcePosition, SourceRange, SymbolReference, TextPatch } from '../types/index.js';
@@ -9,43 +9,41 @@ interface ScriptFile {
   text: string;
 }
 
-export class TypeScriptLanguageService {
-  private readonly files = new Map<string, ScriptFile>();
-  private readonly service: ts.LanguageService;
-  private readonly compilerOptions: ts.CompilerOptions;
-  private readonly rootFiles: string[];
+interface ProjectContext {
+  service: ts.LanguageService;
+  compilerOptions: ts.CompilerOptions;
+  rootFiles: string[];
+  files: Map<string, ScriptFile>;
+}
 
-  constructor(private readonly projectRoot = process.cwd(), tsconfigPath?: string) {
-    const configPath = tsconfigPath ?? ts.findConfigFile(projectRoot, ts.sys.fileExists, 'tsconfig.json');
-    const parsed = configPath ? this.readConfig(configPath) : { options: {}, fileNames: [] };
-    this.compilerOptions = parsed.options;
-    this.rootFiles = parsed.fileNames.map((file) => path.resolve(file));
-    this.service = ts.createLanguageService(this.createHost(), ts.createDocumentRegistry());
-  }
+export class TypeScriptLanguageService {
+  private readonly projects = new Map<string, ProjectContext>();
+
+  constructor(private readonly defaultProjectRoot = process.cwd()) {}
 
   getDiagnostics(filepath: string): CodeDiagnostic[] {
-    const fileName = this.ensureFile(filepath);
+    const { service, fileName } = this.getServiceAndFile(filepath);
     const diagnostics = [
-      ...this.service.getSyntacticDiagnostics(fileName),
-      ...this.service.getSemanticDiagnostics(fileName),
-      ...this.service.getSuggestionDiagnostics(fileName),
+      ...service.getSyntacticDiagnostics(fileName),
+      ...service.getSemanticDiagnostics(fileName),
+      ...service.getSuggestionDiagnostics(fileName),
     ];
 
     return diagnostics.map((diagnostic) => this.toCodeDiagnostic(fileName, diagnostic));
   }
 
   goToDefinition(filepath: string, position: Pick<SourcePosition, 'line' | 'column'>): SymbolReference[] {
-    const fileName = this.ensureFile(filepath);
-    const offset = positionToIndex(this.files.get(fileName)?.text ?? '', position);
-    const definitions = this.service.getDefinitionAtPosition(fileName, offset) ?? [];
+    const { service, fileName, project } = this.getServiceAndFile(filepath);
+    const offset = positionToIndex(project.files.get(fileName)?.text ?? '', position);
+    const definitions = service.getDefinitionAtPosition(fileName, offset) ?? [];
 
     return definitions.map((definition) => this.toSymbolReference(definition.fileName, definition.textSpan, 'export', definition.name));
   }
 
   findReferences(filepath: string, position: Pick<SourcePosition, 'line' | 'column'>): SymbolReference[] {
-    const fileName = this.ensureFile(filepath);
-    const offset = positionToIndex(this.files.get(fileName)?.text ?? '', position);
-    const references = this.service.getReferencesAtPosition(fileName, offset) ?? [];
+    const { service, fileName, project } = this.getServiceAndFile(filepath);
+    const offset = positionToIndex(project.files.get(fileName)?.text ?? '', position);
+    const references = service.getReferencesAtPosition(fileName, offset) ?? [];
 
     return references.map((reference) =>
       this.toSymbolReference(reference.fileName, reference.textSpan, 'call', path.basename(reference.fileName))
@@ -53,16 +51,16 @@ export class TypeScriptLanguageService {
   }
 
   renameSymbol(filepath: string, position: Pick<SourcePosition, 'line' | 'column'>, newName: string): TextPatch[] {
-    const fileName = this.ensureFile(filepath);
-    const source = this.files.get(fileName)?.text ?? '';
+    const { service, fileName, project } = this.getServiceAndFile(filepath);
+    const source = project.files.get(fileName)?.text ?? '';
     const offset = positionToIndex(source, position);
-    const renameInfo = this.service.getRenameInfo(fileName, offset);
+    const renameInfo = service.getRenameInfo(fileName, offset);
 
     if (!renameInfo.canRename) {
       throw new Error(`Cannot rename symbol: ${renameInfo.localizedErrorMessage}`);
     }
 
-    const locations = this.service.findRenameLocations(fileName, offset, false, false, {
+    const locations = service.findRenameLocations(fileName, offset, false, false, {
       providePrefixAndSuffixTextForRename: true,
     });
 
@@ -71,7 +69,7 @@ export class TypeScriptLanguageService {
     }
 
     return locations.map((location) => {
-      const content = this.readFile(location.fileName);
+      const content = this.readFile(location.fileName, project);
       const start = location.textSpan.start;
       const end = location.textSpan.start + location.textSpan.length;
       const prefix = location.prefixText ?? '';
@@ -86,15 +84,15 @@ export class TypeScriptLanguageService {
   }
 
   organizeImports(filepath: string): TextPatch[] {
-    const fileName = this.ensureFile(filepath);
-    const changes = this.service.organizeImports(
+    const { service, fileName, project } = this.getServiceAndFile(filepath);
+    const changes = service.organizeImports(
       { type: 'file', fileName },
       {},
       {}
     );
 
     return changes.flatMap((change) => {
-      const content = this.readFile(change.fileName);
+      const content = this.readFile(change.fileName, project);
       return change.textChanges.map((textChange) => {
         const start = textChange.span.start;
         const end = textChange.span.start + textChange.span.length;
@@ -109,16 +107,16 @@ export class TypeScriptLanguageService {
   }
 
   getCodeFixes(filepath: string, range: SourceRange, errorCodes: number[]): TextPatch[] {
-    const fileName = this.ensureFile(filepath);
-    const content = this.readFile(fileName);
+    const { service, fileName, project } = this.getServiceAndFile(filepath);
+    const content = this.readFile(fileName, project);
     const start = positionToIndex(content, range.start);
     const end = positionToIndex(content, range.end);
 
-    const fixes = this.service.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
+    const fixes = service.getCodeFixesAtPosition(fileName, start, end, errorCodes, {}, {});
 
     return fixes.flatMap((fix) => {
       return fix.changes.flatMap((change) => {
-        const changeContent = this.readFile(change.fileName);
+        const changeContent = this.readFile(change.fileName, project);
         return change.textChanges.map((textChange) => {
           const cStart = textChange.span.start;
           const cEnd = textChange.span.start + textChange.span.length;
@@ -134,27 +132,71 @@ export class TypeScriptLanguageService {
   }
 
   updateFile(filepath: string, text: string): void {
-    const fileName = path.resolve(this.projectRoot, filepath);
-    const previous = this.files.get(fileName);
-    this.files.set(fileName, {
+    const resolved = path.resolve(this.defaultProjectRoot, filepath);
+    const configPath = this.findClosestConfig(resolved);
+    const project = this.ensureProject(configPath);
+    
+    const previous = project.files.get(resolved);
+    project.files.set(resolved, {
       text,
       version: (previous?.version ?? 0) + 1,
     });
   }
 
-  private createHost(): ts.LanguageServiceHost {
+  private getServiceAndFile(filepath: string): { service: ts.LanguageService; fileName: string; project: ProjectContext } {
+    const resolved = path.resolve(this.defaultProjectRoot, filepath);
+    const configPath = this.findClosestConfig(resolved);
+    const project = this.ensureProject(configPath);
+    return { service: project.service, fileName: resolved, project };
+  }
+
+  private findClosestConfig(filepath: string): string {
+    let current = path.dirname(filepath);
+    while (current.length >= this.defaultProjectRoot.length) {
+      const config = path.join(current, 'tsconfig.json');
+      if (existsSync(config)) {
+        return config;
+      }
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+    return path.join(this.defaultProjectRoot, 'tsconfig.json');
+  }
+
+  private ensureProject(configPath: string): ProjectContext {
+    const cached = this.projects.get(configPath);
+    if (cached) return cached;
+
+    const projectRoot = path.dirname(configPath);
+    const parsed = existsSync(configPath) ? this.readConfig(configPath) : { options: {}, fileNames: [] };
+    
+    const files = new Map<string, ScriptFile>();
+    const context: ProjectContext = {
+      compilerOptions: parsed.options,
+      rootFiles: parsed.fileNames.map((file) => path.resolve(file)),
+      files,
+      service: null as any // Placeholder
+    };
+
+    context.service = ts.createLanguageService(this.createHost(context, projectRoot), ts.createDocumentRegistry());
+    this.projects.set(configPath, context);
+    return context;
+  }
+
+  private createHost(project: ProjectContext, projectRoot: string): ts.LanguageServiceHost {
     return {
-      getCompilationSettings: () => this.compilerOptions,
-      getCurrentDirectory: () => this.projectRoot,
+      getCompilationSettings: () => project.compilerOptions,
+      getCurrentDirectory: () => projectRoot,
       getDefaultLibFileName: (options) => ts.getDefaultLibFilePath(options),
-      getScriptFileNames: () => Array.from(new Set([...this.rootFiles, ...this.files.keys()])),
-      getScriptVersion: (fileName) => String(this.files.get(path.resolve(fileName))?.version ?? 0),
+      getScriptFileNames: () => Array.from(new Set([...project.rootFiles, ...project.files.keys()])),
+      getScriptVersion: (fileName) => String(project.files.get(path.resolve(fileName))?.version ?? 0),
       getScriptSnapshot: (fileName) => {
         const resolved = path.resolve(fileName);
         if (!ts.sys.fileExists(resolved)) {
           return undefined;
         }
-        const text = this.readFile(resolved);
+        const text = this.readFile(resolved, project);
         return ts.ScriptSnapshot.fromString(text);
       },
       fileExists: ts.sys.fileExists,
@@ -176,26 +218,24 @@ export class TypeScriptLanguageService {
     );
   }
 
-  private ensureFile(filepath: string): string {
-    const fileName = path.resolve(this.projectRoot, filepath);
-    this.readFile(fileName);
-    return fileName;
-  }
-
-  private readFile(fileName: string): string {
+  private readFile(fileName: string, project: ProjectContext): string {
     const resolved = path.resolve(fileName);
-    const cached = this.files.get(resolved);
+    const cached = project.files.get(resolved);
     if (cached) {
       return cached.text;
     }
 
     const text = readFileSync(resolved, 'utf8');
-    this.files.set(resolved, { text, version: 1 });
+    project.files.set(resolved, { text, version: 1 });
     return text;
   }
 
   private toCodeDiagnostic(fileName: string, diagnostic: ts.Diagnostic): CodeDiagnostic {
-    const content = this.readFile(fileName);
+    // We need to find the project to read the file content
+    const configPath = this.findClosestConfig(fileName);
+    const project = this.ensureProject(configPath);
+    
+    const content = this.readFile(fileName, project);
     const start = diagnostic.start ?? 0;
     const end = start + (diagnostic.length ?? 0);
 
@@ -214,7 +254,10 @@ export class TypeScriptLanguageService {
     kind: SymbolReference['kind'],
     name: string
   ): SymbolReference {
-    const content = this.readFile(fileName);
+    const configPath = this.findClosestConfig(fileName);
+    const project = this.ensureProject(configPath);
+    
+    const content = this.readFile(fileName, project);
     const range: SourceRange = {
       start: indexToPosition(content, textSpan.start),
       end: indexToPosition(content, textSpan.start + textSpan.length),

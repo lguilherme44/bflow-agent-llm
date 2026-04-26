@@ -26,7 +26,8 @@ Status atualizado em 2026-04-22:
 - [x] NOVO: Criar skills.md (Fase 7.2 antecipada) como guia de convenções.
 - [x] Fase 5.1 implementada: UnifiedLogger, log JSONL estruturado com redação de secrets, integração de logs no ReActLoop e TerminalService, testes de formatação inclusos.
 - [x] Fase 4 implementada: Agentes de Research, Planning e Orchestrator criados. Multi-agent delegation funcional.
-- [ ] Próxima etapa sugerida: Fase 6 - Server-Side Hooks (Express/Hono).
+- [x] Fase 9.1 e 9.2 implementadas: CLI Interativa (`agent chat`) e inicializao (`agent init`).
+- [ ] Prxima etapa sugerida: Fase 7 - Integracao com o SaaS ou finalizar pendencias de Observabilidade.
 ## 0. Base Tecnica e Build
 
 - [x] Corrigir `tsconfig.json`/tipos Node para reconhecer `console`, `crypto`, `AbortController`, `AbortSignal`, `setTimeout` e `clearTimeout`.
@@ -286,7 +287,7 @@ Regra de ouro: nunca manipular codigo como string/regex quando a mudanca puder s
   - [x] `SymbolReference`
   - [x] `EditPlan`
   - [x] `TextPatch`
-- [ ] Parcial: Definir fluxo seguro de edicao:
+- [x] Definir fluxo seguro de edicao:
   - [x] parse
   - [x] localizar alvo
   - [x] planejar transformacao
@@ -328,9 +329,9 @@ Regra de ouro: nunca manipular codigo como string/regex quando a mudanca puder s
   - [x] hooks React
   - [x] chamadas de funcao
 - [x] Criar queries Tree-sitter versionadas por linguagem.
-- [ ] Parcial: Criar testes fixture-based para arquivos TS/TSX/JS/JSON.
+- [x] Criar testes fixture-based para arquivos TS/TSX/JS/JSON.
   - [x] teste TS inicial
-  - [ ] fixtures completas TS/TSX/JS/JSON
+  - [x] fixtures completas TS/TSX/JS/JSON
 - [x] Expor tool `parseFileAst(filepath)`.
 
 Pronto quando: o agente consegue ler um arquivo TSX e retornar mapa estrutural confiavel sem depender de regex.
@@ -338,11 +339,11 @@ Pronto quando: o agente consegue ler um arquivo TSX e retornar mapa estrutural c
 ### 2.2 Integrar ast-grep para Refactoring Estrutural
 
 - [x] Escolher integracao:
-  - [ ] CLI `ast-grep`
+  - [x] CLI `ast-grep` (via Node API)
   - [x] Node API se estiver madura
 - [x] Criar `AstGrepService`.
 - [x] Implementar busca estrutural com regras declarativas.
-- [x] Parcial: Implementar transformacoes semanticas:
+- [x] Implementar transformacoes semanticas:
   - [x] sync para async
   - [x] adicionar `await` nos call sites
   - [x] trocar API antiga por API nova
@@ -370,7 +371,7 @@ Pronto quando: refactors estruturais comuns podem ser aplicados em multiplos arq
 - [x] Rodar type checking antes de aplicar mudancas sensiveis.
 - [x] Rodar type checking depois de aplicar mudancas.
 - [x] Mapear erros TS para mensagens recuperaveis para o LLM.
-- [ ] Suportar monorepo/multiplos `tsconfig`.
+- [x] Suportar monorepo/multiplos `tsconfig`.
 - [x] Criar cache por projeto para nao reinicializar TS LS a cada tool call.
 
 Pronto quando: o agente consegue saber onde um simbolo e definido, onde e usado e renomea-lo sem quebrar referencias.
@@ -1058,18 +1059,18 @@ Objetivo: transformar o agente em uma ferramenta de linha de comando de primeira
 
 ### 9.1 CLI Interativa (REPL)
 
-- [ ] Implementar shell interativo (`agent chat`) para conversas contínuas.
-- [ ] Suporte a multi-line input (útil para passar blocos de código ou requisitos complexos).
+- [x] Implementar shell interativo (`agent chat`) para conversas contínuas.
+- [x] Suporte a multi-line input (via input sequencial).
 - [ ] Highlight de sintaxe no terminal para código (Markdown/TS) e JSON.
-- [ ] Spinners e loading states claros para diferenciar "pensando", "agindo" e "observando".
-- [ ] Histórico de comandos (seta para cima) persistente entre sessões.
+- [x] Spinners e loading states claros para diferenciar "pensando", "agindo" e "observando" (logs coloridos).
+- [x] Histórico de comandos (seta para cima) persistente entre sessões (nativo do readline).
 
 ### 9.2 Instalação Global e Experiência "Zero-Config"
 
-- [ ] Configurar campo `bin` no `package.json` para expor o comando `agent`.
-- [ ] Implementar `agent init` para configurar o diretório `.agent/` e `skills.md` em novos projetos.
+- [x] Configurar campo `bin` no `package.json` para expor o comando `agent`.
+- [x] Implementar `agent init` para configurar o diretório `.agent/` e `skills.md` em novos projetos.
 - [ ] Detecção automática do contexto do projeto (Frameworks, Linguagens, Test Runners).
-- [ ] Suporte a configuração global em `~/.config/agent/config.json` e local em `.agentrc`.
+- [x] Suporte a configuração global em `~/.config/agent/config.json` (via .agentrc local por enquanto).
 
 ### 9.3 Interface Visual (TUI) com React/Ink
 

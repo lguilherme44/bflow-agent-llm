@@ -18,7 +18,8 @@ export { createDevelopmentToolRegistry } from './tools/development-tools.js';
 export { ToolExecutor } from './tools/executor.js';
 export { ToolRegistry } from './tools/registry.js';
 export { createTool } from './tools/schema.js';
-export { LanceDBStore, TfIdfVectorizer } from './rag/lancedb-store.js';
+export { LanceDBStore } from './rag/lancedb-store.js';
+export { EmbeddingProvider, TfIdfEmbeddingProvider, OllamaEmbeddingProvider } from './rag/embeddings.js';
 export { RankingUtils } from './rag/ranking-utils.js';
 export * from './types/index.js';
 

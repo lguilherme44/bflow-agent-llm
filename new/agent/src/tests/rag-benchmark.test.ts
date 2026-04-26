@@ -61,7 +61,7 @@ test('RAG Benchmark — known queries return expected files', async () => {
   let hits = 0;
 
   for (const testCase of BENCHMARK_CASES) {
-    const retrieved = rag.retrieve({ task: testCase.query, limit: testCase.k });
+    const retrieved = await rag.retrieveHybrid({ task: testCase.query, limit: testCase.k });
     const topFiles = retrieved.map((r) => r.chunk.metadata.filepath);
 
     const hit = testCase.expectedFiles.every((expected) =>

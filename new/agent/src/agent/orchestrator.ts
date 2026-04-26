@@ -51,6 +51,7 @@ export class OrchestratorAgent {
   private workspaceRoot: string;
   private fallbackHumanApprovalCallback?: ReActConfig['humanApprovalCallback'];
   private hookService: HookService;
+  private autoApprove: boolean = false;
 
   constructor(private config: ReActConfig, feedbackPolicy?: Partial<FeedbackLoopPolicy>) {
     const languageInstruction = "\n\nIMPORTANT: Always respond in the same language as the user's prompt. If the user speaks Portuguese, you MUST respond in Portuguese.";
@@ -95,6 +96,10 @@ export class OrchestratorAgent {
         humanApprovalCallback: async (toolCall, reason) => {
             const evaluation = this.riskEngine.evaluateToolCall(toolCall.toolName, toolCall.arguments);
 
+            if (this.autoApprove) {
+                return true;
+            }
+
             if (this.onUpdate) {
                 return new Promise((resolve) => {
                     this.approvalResolver = resolve;
@@ -126,6 +131,13 @@ export class OrchestratorAgent {
     this.notify({ type: 'usage_update', usage: this.totalUsage });
   }
 
+  public setAutoApprove(approved: boolean) {
+    this.autoApprove = approved;
+    if (approved && this.approvalResolver) {
+        this.resolveApproval(true);
+    }
+  }
+
   private notify(event: OrchestratorEvent) {
     this.onUpdate?.(event);
   }
@@ -145,30 +157,21 @@ export class OrchestratorAgent {
     logger?.logEvent(state.id, 'orchestrator_started', { task });
     state = AgentStateMachine.dispatch(state, { type: 'task_started' });
 
-    const now = new Date();
-    const days = ['domingo', 'segunda-feira', 'terça-feira', 'quarta-feira', 'quinta-feira', 'sexta-feira', 'sábado'];
-    const dayName = days[now.getDay()];
-    const dateStr = now.toLocaleDateString('pt-BR');
-    const timeStr = now.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const currentContext = `Data: ${dateStr} (${dayName}), Hora: ${timeStr}`;
-
-    // --- ETAPA: CLASSIFICAÇÃO DE INTENÇÃO (Otimizada para economizar tokens no início) ---
+    // --- ETAPA: CLASSIFICAÇÃO DE INTENÇÃO (Otimizada para economizar tokens e tempo) ---
     const intentSpan = tracing?.startPhaseSpan('Intent Classification', orchestratorSpan);
     
     const isGreeting = /^(oi|olá|ola|hello|hi|bom dia|boa tarde|boa noite|apresente-se|quem é você)(\!|\?|\.)*$/i.test(task.trim());
     
-    let intent: string;
+    let intent: 'CHAT' | 'TASK' | 'DIRECT';
     if (isGreeting || task === 'Oi! Como posso te ajudar hoje?') {
       intent = 'CHAT';
-      intentSpan?.setAttributes({ 'orchestrator.intent': intent, 'orchestrator.classification_skipped': true });
-      intentSpan?.end();
     } else {
-      const intentPrompt = `Analise a tarefa do usuário: "${task}"\nContexto temporal: ${currentContext}\n\nResponda apenas com uma palavra:\n- "CHAT": se for uma saudação (oi, olá), conversa informal, apresentação (quem é você, o que você faz), ou pedido para se apresentar.\n- "TASK": se for um comando técnico, solicitação de código, análise de arquivos, bugfix ou tarefa de engenharia.`;
+      const intentPrompt = `Analise a tarefa: "${task}"\n\nClassifique em:\n- "CHAT": Saudação ou conversa informal.\n- "DIRECT": Pergunta simples que você já sabe a resposta (ex: "como fazer build", "o que é typescript") e não precisa ler arquivos ou rodar comandos.\n- "TASK": Tarefa que exige analisar o código, criar arquivos, rodar testes ou comandos de terminal.\n\nResponda APENAS com a palavra da categoria.`;
       
       try {
         const intentResponse = await this.config.llm.complete([{ 
             role: 'system', 
-            content: 'Você é um classificador de intenções. Responda apenas "CHAT" ou "TASK".',
+            content: 'Você é um classificador de intenções rápido.',
             timestamp: new Date().toISOString()
         }, { 
             role: 'user', 
@@ -176,37 +179,28 @@ export class OrchestratorAgent {
             timestamp: new Date().toISOString()
         }], { ...this.config.llmConfig, temperature: 0 });
 
-        intent = intentResponse.content.trim().toUpperCase();
-        intentSpan?.setAttributes({ 'orchestrator.intent': intent });
-        intentSpan?.end();
+        const raw = intentResponse.content.trim().toUpperCase();
+        intent = raw.includes('TASK') ? 'TASK' : raw.includes('DIRECT') ? 'DIRECT' : 'CHAT';
       } catch (error) {
-        intentSpan?.setStatus({ code: 2, message: String(error) });
-        intentSpan?.end();
-        throw error;
+        intent = 'TASK'; // Fallback seguro
       }
     }
+    intentSpan?.end();
 
-    if (intent.includes('CHAT')) {
-        this.notify({ type: 'phase_start', phase: 'Chat' });
-        logger?.logEvent(state.id, 'phase_started', { phase: 'Chat' });
+    if (intent === 'CHAT' || intent === 'DIRECT') {
+        const phase = intent === 'CHAT' ? 'Chat' : 'Resposta Direta';
+        this.notify({ type: 'phase_start', phase });
         
+        const systemPrompt = intent === 'CHAT' 
+          ? 'Você é um assistente amigável. Responda de forma natural e concisa.'
+          : 'Você é um engenheiro sênior. Responda a pergunta técnica de forma direta e útil, sem usar ferramentas.';
+
         const chatResponse = await this.config.llm.complete([
-          { 
-            role: 'system', 
-            content: 'Você é um assistente amigável. Responda em Português (PT-BR) de forma natural e concisa. Não use ferramentas nem JSON, apenas texto puro.',
-            timestamp: new Date().toISOString()
-          },
-          { 
-            role: 'user', 
-            content: task,
-            timestamp: new Date().toISOString()
-          }
+          { role: 'system', content: systemPrompt, timestamp: new Date().toISOString() },
+          { role: 'user', content: task, timestamp: new Date().toISOString() }
         ], this.config.llmConfig);
 
-        this.totalUsage.promptTokens += chatResponse.usage.promptTokens;
-        this.totalUsage.completionTokens += chatResponse.usage.completionTokens;
         this.totalUsage.totalTokens += chatResponse.usage.totalTokens;
-        
         this.notify({ type: 'usage_update', usage: this.totalUsage });
         this.notify({ 
           type: 'message_added', 
@@ -219,9 +213,7 @@ export class OrchestratorAgent {
         this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${chatResponse.content}` });
         this.notify({ type: 'phase_complete', phase: 'Finalized' });
         
-        state = AgentStateMachine.dispatch(state, { type: 'task_completed' });
-        state.metadata.totalTokensUsed = this.totalUsage.totalTokens;
-        
+        state = AgentStateMachine.complete(state, chatResponse.content);
         return { state };
     }
 
@@ -402,21 +394,14 @@ export class OrchestratorAgent {
           ...this.config.llmConfig,
           systemPrompt:
             (this.config.llmConfig?.systemPrompt || '') +
-            `\n\n### CONTEXTO DE PESQUISA\n${JSON.stringify(brief, null, 2)}\n` +
-            `### PLANO DE EXECUCAO\n${plan.summary}\n` +
-            `\n\n${specializedPrompt}` +
-            `\n\nSua missao e executar as tarefas acima.` +
-            `\n\nREGRAS CRITICAS DE IDIOMA E SAIDA:` +
-            `\n1. VOCE DEVE FALAR EXCLUSIVAMENTE EM PORTUGUES (PT-BR).` +
-            `\n2. TODOS OS SEUS PENSAMENTOS ('thought') E RESUMOS ('summary') DEVEM SER EM PORTUGUES.` +
-            `\n3. NAO USE INGLES, MESMO QUE AS FERRAMENTAS RETORNEM TEXTO EM INGLES.` +
-            `\n4. PARA FINALIZAR, USE A FERRAMENTA 'complete_task' E ESCREVA O RESUMO EM PORTUGUES.` +
-            `\n5. USE SEMPRE OS CAMINHOS EXATOS RETORNADOS PELAS FERRAMENTAS. NAO ADICIONE NEM REMOVA PREFIXOS DE DIRETORIO.`,
+            `\n<context>\n<research>\n- Tipo: ${brief.taskType}\n- Entradas: ${brief.entryPoints.join(', ')}\n- Resumo: ${brief.summary}\n</research>\n<plan>${plan.summary}</plan>\n</context>\n` +
+            `\n${specializedPrompt}` +
+            `\n<instructions>\n- IDIOMA: PT-BR OBRIGATÓRIO (pensamentos e resumos).\n- FERRAMENTAS: Use caminhos EXATOS das ferramentas.\n- FINALIZAR: 'complete_task' com resumo em PT-BR.\n</instructions>`,
         },
       });
 
       const workerState = await workerAgent.run(
-        `Stream ${stream.id} tasks:\n- ${stream.tasks.join('\n- ')}`,
+        `<task>Stream ${stream.id}:\n${stream.tasks.map(t => `- ${t}`).join('\n')}</task>`,
         undefined,
         streamSpan
       );
