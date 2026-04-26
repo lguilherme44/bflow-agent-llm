@@ -22,7 +22,8 @@
     "vagent:ollama": "npm run vagent -- --provider=ollama",
     "vagent:lmstudio": "npm run vagent -- --provider=lmstudio",
     "test": "npm run build && node --test dist/tests/*.test.js",
-    "server": "npm run build && node dist/server.js"
+    "server": "npm run build && node dist/server.js",
+    "dashboard:build": "cd dashboard && npm run build"
   },
   "keywords": [],
   "author": "",
@@ -37,6 +38,7 @@
     "@types/lunr": "^2.3.7",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
+    "@types/ws": "^8.18.1",
     "nodemon": "^3.1.14",
     "tsx": "^4.21.0",
     "typescript": "^6.0.3"
@@ -60,6 +62,7 @@
     "tree-sitter": "^0.21.1",
     "tree-sitter-javascript": "^0.21.4",
     "tree-sitter-json": "^0.24.8",
-    "tree-sitter-typescript": "^0.21.2"
+    "tree-sitter-typescript": "^0.21.2",
+    "ws": "^8.20.0"
   }
 }

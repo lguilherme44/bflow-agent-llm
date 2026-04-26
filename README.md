@@ -44,9 +44,16 @@ npm install
 ### Configuração
 Crie um arquivo `.env` na raiz:
 ```env
+### AGENTE LLM (Opcional usar OpenAI/LMStudio na porta 11434)
 AGENT_LLM_PROVIDER=ollama
 AGENT_LLM_MODEL=qwen2.5-coder
 AGENT_LLM_BASE_URL=http://localhost:11434
+
+### Embeddings
+OLLAMA_EMBED_MODEL=nomic-embed-text
+OLLAMA_BASE_URL=http://127.0.0.1:11434
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_DIMENSIONS=768
 ```
 
 ### Comandos Principais
