@@ -48,12 +48,20 @@ export class LocalRagService {
 
   private resolveDefaultProvider(): EmbeddingProvider {
     const type = process.env.EMBEDDING_PROVIDER || 'tf-idf';
-    
+
     if (type === 'ollama') {
+      const model = process.env.OLLAMA_EMBED_MODEL;
+      const baseUrl = process.env.OLLAMA_BASE_URL;
+      const dimensions = Number.parseInt(process.env.OLLAMA_EMBED_DIMENSIONS || '1024');
+
+      if (!model || !baseUrl) {
+        throw new Error('OLLAMA_EMBED_MODEL and OLLAMA_BASE_URL must be set when EMBEDDING_PROVIDER is "ollama"');
+      }
+
       return new OllamaEmbeddingProvider(
-        768,
-        process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text',
-        process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434'
+        dimensions,
+        model,
+        baseUrl
       );
     }
 
@@ -63,7 +71,7 @@ export class LocalRagService {
   async indexWorkspace(directory = '.'): Promise<RagIndexStats> {
     const targetPath = path.resolve(this.workspaceRoot, directory);
     const targetStat = await stat(targetPath);
-    
+
     let files: string[];
     if (targetStat.isFile()) {
       files = isIndexable(targetPath) ? [targetPath] : [];
@@ -175,13 +183,13 @@ export class LocalRagService {
     if (results.length <= 1) return results;
 
     const terms = query.toLowerCase().split(/\s+/).filter(t => t.length > 3);
-    
+
     return RankingUtils.rerank(
       results.map(r => ({ item: r, score: r.score })),
       query,
       async (res) => {
         let boost = res.score;
-        
+
         // Semantic boost: if query terms appear in chunk symbols
         for (const term of terms) {
           if (res.chunk.metadata.symbols.some(s => s.toLowerCase().includes(term))) {
@@ -243,14 +251,14 @@ export class LocalRagService {
     const filenameResults = this.filenameRank(filteredChunks, input.task);
 
     const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults, filenameResults]);
-    
+
     return combined.slice(0, limit).map(({ item, score }) => {
       const reasons: string[] = [];
       if (lexicalResults.includes(item)) reasons.push('lexical match');
       if (recencyResults.slice(0, 10).includes(item)) reasons.push('recent file');
       if (centralityResults.slice(0, 10).includes(item)) reasons.push('structural centrality');
       if (filenameResults.slice(0, 5).includes(item)) reasons.push('filename match');
-      
+
       return { chunk: item, score, reasons };
     });
   }
@@ -301,13 +309,13 @@ export class LocalRagService {
       .sort((a, b) => {
         const filepathA = a.metadata.filepath.toLowerCase();
         const filepathB = b.metadata.filepath.toLowerCase();
-        
+
         // Count how many terms match in the path
         const matchesA = terms.filter(t => filepathA.includes(t)).length;
         const matchesB = terms.filter(t => filepathB.includes(t)).length;
-        
+
         if (matchesB !== matchesA) return matchesB - matchesA;
-        
+
         // Tie-breaker: shorter path (usually more "root" or direct)
         return filepathA.length - filepathB.length;
       });

@@ -141,7 +141,8 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
       });
 
       if (!response.ok) {
-        throw new Error(`Ollama embedding failed: ${response.statusText}`);
+        const errorBody = await response.text();
+        throw new Error(`Ollama embedding failed: ${response.statusText} - ${errorBody}`);
       }
 
       const data = await response.json() as { embeddings: number[][] };

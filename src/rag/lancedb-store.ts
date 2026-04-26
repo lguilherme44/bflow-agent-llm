@@ -68,7 +68,8 @@ export class LanceDBStore {
     if (chunks.length === 0) return;
 
     // Fit vectorizer if needed (for TF-IDF) or just get embeddings
-    const embeddings = await this.embeddingProvider.embedBatch(chunks.map((c) => c.content));
+    // We truncate to 4000 chars to avoid context length issues in some models
+    const embeddings = await this.embeddingProvider.embedBatch(chunks.map((c) => c.content.slice(0, 4000)));
 
     // Convert chunks to records
     const records: LanceDBChunkRecord[] = chunks.map((chunk, i) => ({

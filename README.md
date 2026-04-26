@@ -50,14 +50,25 @@ AGENT_LLM_BASE_URL=http://localhost:11434
 ```
 
 ### Comandos Principais
-```bash
-# Validar tipos
-npm run typecheck
 
-# Compilar o projeto
+#### Desenvolvimento
+```bash
+# Iniciar o agente em modo chat (desenvolvimento rápido)
+npm run dev chat
+
+# Iniciar o agente com watch mode (recarrega ao salvar)
+npm run dev:agent chat
+
+# Iniciar o servidor de integração com IDE (Continue.dev)
+npm run dev:server
+```
+
+#### Produção / Build
+```bash
+# Validar tipos e compilar
 npm run build
 
-# Iniciar o agente em modo chat
+# Executar a partir do build
 node dist/cli.js chat
 ```
 

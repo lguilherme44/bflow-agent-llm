@@ -12,13 +12,15 @@
     "typecheck": "tsc --noEmit",
     "lint": "npm run typecheck",
     "start": "node dist/index.js",
+    "dev": "tsx src/cli.ts",
+    "dev:server": "tsx watch src/server.ts",
+    "dev:agent": "tsx watch src/cli.ts",
     "agent": "npm run build && node dist/cli.js",
     "vagent": "npm run build && node dist/visual-cli.js",
     "agent:ollama": "npm run agent -- --provider=ollama",
     "agent:lmstudio": "npm run agent -- --provider=lmstudio",
     "vagent:ollama": "npm run vagent -- --provider=ollama",
     "vagent:lmstudio": "npm run vagent -- --provider=lmstudio",
-    "dev": "npm run build && npm run agent",
     "test": "npm run build && node --test dist/tests/*.test.js",
     "server": "npm run build && node dist/server.js"
   },
@@ -35,6 +37,8 @@
     "@types/lunr": "^2.3.7",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
+    "nodemon": "^3.1.14",
+    "tsx": "^4.21.0",
     "typescript": "^6.0.3"
   },
   "dependencies": {
