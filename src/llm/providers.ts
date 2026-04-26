@@ -65,7 +65,7 @@ abstract class BaseHttpProvider implements LLMProvider {
         for (const line of lines) {
           const trimmed = line.trim();
           if (!trimmed || !trimmed.startsWith('data: ')) continue;
-          
+
           const data = trimmed.slice(6);
           if (data === '[DONE]') break;
 
@@ -214,9 +214,9 @@ export class OpenAIProvider extends BaseHttpProvider {
   }
 
   protected extractUsage(payload: Record<string, unknown>): LLMProviderResponse['usage'] {
-    const usage = payload.usage as { 
-      prompt_tokens?: number; 
-      completion_tokens?: number; 
+    const usage = payload.usage as {
+      prompt_tokens?: number;
+      completion_tokens?: number;
       total_tokens?: number;
       completion_tokens_details?: { reasoning_tokens?: number }
     } | undefined;
@@ -326,7 +326,7 @@ export class LMStudioProvider extends OpenAIProvider {
       baseUrl: 'http://localhost:1234/v1/chat/completions',
       defaultModel: 'local-model',
     };
-    
+
     super({
       ...defaults,
       ...Object.fromEntries(Object.entries(config ?? {}).filter(([_, v]) => v !== undefined))
@@ -384,6 +384,7 @@ export class OllamaProvider extends OpenAIProvider {
       options: {
         temperature: request.config?.temperature ?? 0.2,
         num_predict: request.config?.maxTokens,
+        num_ctx: 8192,
       },
     };
   }
