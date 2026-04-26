@@ -87,11 +87,12 @@ export class PlanningAgent {
       llmConfig: {
         ...config.llmConfig,
         systemPrompt: (config.llmConfig?.systemPrompt || '') + 
-          `\n\nVocê é um Agente de Planejamento. Sua missão é criar um plano de execução seguro.` +
-          `\nREGRAS CRÍTICAS:` +
-          `\n1. FALE APENAS EM PORTUGUÊS (PT-BR).` +
-          `\n2. Use a ferramenta 'submit_execution_plan' para finalizar sua fase. VOCÊ SÓ PODE TERMINAR USANDO ESTA FERRAMENTA.` +
-          `\n3. USE SEMPRE OS CAMINHOS EXATOS RETORNADOS PELAS FERRAMENTAS. NÃO ADICIONE NEM REMOVA PREFIXOS DE DIRETÓRIO.`
+          `\n<role>Planejador: Crie um plano de execução seguro.</role>` +
+          `\n<rules>` +
+          `\n- IDIOMA: PT-BR OBRIGATÓRIO.` +
+          `\n- FINALIZAR: Use 'submit_execution_plan'.` +
+          `\n- FERRAMENTAS: Use caminhos EXATOS.` +
+          `\n</rules>`
       }
     });
   }

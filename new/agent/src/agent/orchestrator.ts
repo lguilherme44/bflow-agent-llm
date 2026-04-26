@@ -166,7 +166,7 @@ export class OrchestratorAgent {
     if (isGreeting || task === 'Oi! Como posso te ajudar hoje?') {
       intent = 'CHAT';
     } else {
-      const intentPrompt = `Analise a tarefa: "${task}"\n\nClassifique em:\n- "CHAT": Saudação ou conversa informal.\n- "DIRECT": Pergunta simples que você já sabe a resposta (ex: "como fazer build", "o que é typescript") e não precisa ler arquivos ou rodar comandos.\n- "TASK": Tarefa que exige analisar o código, criar arquivos, rodar testes ou comandos de terminal.\n\nResponda APENAS com a palavra da categoria.`;
+      const intentPrompt = `Analise a tarefa: "${task}"\n\nClassifique em:\n- "CHAT": Saudação, agradecimento ou conversa informal.\n- "DIRECT": Pergunta técnica simples que você já sabe a resposta (ex: "o que é typescript") e que NÃO exige ler arquivos específicos do projeto.\n- "TASK": Tarefa que exige analisar o código, ler arquivos (especialmente se houver menções a arquivos como @nome_do_arquivo), criar arquivos, rodar testes ou comandos de terminal.\n\nIMPORTANTE: Se o usuário mencionar um arquivo específico ou pedir para implementar algo, classifique sempre como "TASK".\n\nResponda APENAS com a palavra da categoria.`;
       
       try {
         const intentResponse = await this.config.llm.complete([{ 
@@ -186,6 +186,7 @@ export class OrchestratorAgent {
       }
     }
     intentSpan?.end();
+    logger?.logEvent(state.id, 'intent_classified', { intent, task });
 
     if (intent === 'CHAT' || intent === 'DIRECT') {
         const phase = intent === 'CHAT' ? 'Chat' : 'Resposta Direta';
@@ -214,6 +215,7 @@ export class OrchestratorAgent {
         this.notify({ type: 'phase_complete', phase: 'Finalized' });
         
         state = AgentStateMachine.complete(state, chatResponse.content);
+        logger?.logEvent(state.id, 'phase_completed', { phase, content: chatResponse.content });
         return { state };
     }
 
