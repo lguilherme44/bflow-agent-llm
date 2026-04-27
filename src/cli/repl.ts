@@ -139,12 +139,21 @@ export async function runRepl(
         model = await rl.question('Modelo (deixe em branco para o padrão): ');
       }
 
-      const baseUrl = await rl.question('Base URL (deixe em branco para o padrão): ');
-      
+      let apiKey = '';
+      if (['openai', 'anthropic', 'openrouter'].includes(provider)) {
+        console.log(picocolors.yellow(`\nProvider ${provider} requer uma API Key.`));
+        apiKey = await rl.question('API Key (deixe em branco para usar a do .env): ');
+      }
+
+      const temperature = await rl.question('Temperatura (0.0 a 1.0, padrão 0.2): ');
+      const maxTokens = await rl.question('Max Tokens (padrão 2048): ');
+
       const newConfig: Partial<AgentConfig> = { provider };
       if (model) newConfig.model = model;
       if (baseUrl) newConfig.baseUrl = baseUrl;
-
+      if (apiKey) newConfig.apiKey = apiKey;
+      if (temperature) newConfig.temperature = parseFloat(temperature);
+      if (maxTokens) newConfig.maxTokens = parseInt(maxTokens);
 
       saveConfig(newConfig);
       
@@ -175,10 +184,12 @@ export async function runRepl(
 
 
   // Se houver uma tarefa inicial (passada via CLI), executa ela primeiro
-  if (currentTask) {
+  if (currentTask && currentOrchestrator) {
     console.log(picocolors.yellow(`Executando tarefa inicial: ${currentTask}`));
     await currentOrchestrator.run(currentTask);
     currentTask = undefined;
+  } else if (currentTask && !currentOrchestrator) {
+    console.log(picocolors.red('Aviso: Tarefa inicial ignorada pois não há orchestrator conectado. Use /connect primeiro.'));
   }
 
   while (true) {
@@ -190,6 +201,11 @@ export async function runRepl(
     }
 
     if (!input.trim()) continue;
+    
+    if (!currentOrchestrator && !input.startsWith('/')) {
+      console.log(picocolors.red('Erro: Você não está conectado a um provider. Use /connect para configurar.'));
+      continue;
+    }
 
     if (input.startsWith('/')) {
       const handled = await handleCommand(input);

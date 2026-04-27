@@ -16,7 +16,9 @@ import {
     SECURITY_REVIEWER_PROMPT,
     PERFORMANCE_REVIEWER_PROMPT,
     UX_REVIEWER_PROMPT,
-    ERROR_HANDLING_REVIEWER_PROMPT
+    ERROR_HANDLING_REVIEWER_PROMPT,
+    DOCS_PROMPT,
+    MIGRATION_PROMPT
 } from '../prompts/specialized.js';
 import { WorkspaceManager } from '../code/workspace-manager.js';
 import { TerminalService } from '../code/terminal-service.js';
@@ -778,7 +780,8 @@ export class OrchestratorAgent {
       case 'tester':
       case 'test': return TESTER_PROMPT;
       case 'debug': return DEBUG_PROMPT;
-      case 'docs': return 'Você é um agente de documentação. Atualize README, CHANGELOG e ADRs.';
+      case 'docs': return DOCS_PROMPT;
+      case 'migration': return MIGRATION_PROMPT;
       default: return `Você é um agente especializado em ${role}.`;
     }
   }

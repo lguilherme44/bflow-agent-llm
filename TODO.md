@@ -119,7 +119,17 @@ Status atualizado em 2026-04-22:
 - [x] Fase 9.3 e 9.4 implementadas: Interface Visual (TUI) com Ink, listagem e retomada de sessoes.
 - [x] NOVO: Comando `/connect` interativo com suporte a selecao e download de modelos locais (Ollama/LM Studio).
 - [x] NOVO: Trava de Seguranca (Safety Lock) no Orquestrador para aprovacao humana do plano de execucao.
-- [ ] Prxima etapa sugerida: Fase 7 - Integracao com o SaaS ou finalizar pendencias de Observabilidade (LangSmith).
+
+### ✅ O que já temos (Fases 1-6 & 9)
+- [x] **Core ReAct**: Loop completo de Observar, Pensar, Agir e Verificar.
+- [x] **Gestão de Estado**: Checkpoints em disco e HITL funcional.
+- [x] **Multi-Agente Especializado**: Orquestração com Feedback Loops automáticos.
+- [x] **Tools de Código**: Leitura/Edição estrutural via AST.
+- [x] **RAG Local**: Busca híbrida integrada ao Orchestrator.
+- [x] **Observabilidade**: Tracing com spans e Dashboard de tokens/custo.
+- [x] **Integração MCP**: Suporte a ferramentas externas via MCP.
+- [x] **CLI & Visual CLI**: Interface interativa e progresso visual.
+
 ## 0. Base Tecnica e Build
 
 - [x] Corrigir `tsconfig.json`/tipos Node para reconhecer `console`, `crypto`, `AbortController`, `AbortSignal`, `setTimeout` e `clearTimeout`.
@@ -496,7 +506,7 @@ Pronto quando: o agente consegue saber onde um simbolo e definido, onde e usado 
 - [x] `renameSymbol(filepath, position, newName)`.
 - [x] `findReferences(filepath, position)`.
 - [x] `applyEditPlan(planId)` com HITL opcional.
-- [x] `revertEditPlan(planId)` para rollback.
+- [x] `revertEditPlan(planId)` for rollback.
 
 Pronto quando: o agente possui CRUD de codigo com AST, diffs e validacao.
 
@@ -810,13 +820,13 @@ Pronto quando: nenhuma mudanca e considerada pronta sem passar pelos gates defin
 - [x] `ReviewerAgent`: (Implementado via REVIEWER_PROMPT)
 - [x] `TestAgent`: (Implementado via TESTER_PROMPT)
 - [x] `DebugAgent`: (Implementado via DEBUG_PROMPT)
-- [x] `DocsAgent`:
-  - [ ] atualiza README/docs/ADRs quando necessario
-- [ ] `MigrationAgent`:
-  - [ ] cuida de database/schema quando existir
-  - [ ] sempre sob HITL reforcado
+- [x] `DocsAgent`: (Implementado via DOCS_PROMPT)
+  - [x] atualiza README/docs/ADRs quando necessario
+- [x] `MigrationAgent`: (Implementado via MIGRATION_PROMPT)
+  - [x] cuida de database/schema quando existir
+  - [x] sempre sob HITL reforcado
 - [x] Definir permissoes por agente (Toolset restrito por prompt e Orchestrator).
-- [ ] Definir tool budget por agente.
+- [x] Definir tool budget por agente.
 
 Pronto quando: o trabalho pode ser dividido por especialidade com privilegio minimo.
 

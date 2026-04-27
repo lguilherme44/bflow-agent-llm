@@ -8,12 +8,13 @@ BFlow é um agente de software fundamentado no ciclo **ReAct (Observe-Think-Act-
 
 ## ✨ Diferenciais
 
-- **🧠 Arquitetura Multi-Agente**: Orquestração entre sub-agentes especializados (Research, Planning, Coder, Reviewer).
+- **🧠 Arquitetura Multi-Agente**: Orquestração entre sub-agentes especializados (Research, Planning, Coder, Reviewer, Tester, Debugger, Docs, Migration).
 - **💾 Estado Persistente e Retomável**: Todo o progresso é salvo em checkpoints atômicos. Se a luz cair ou o modelo falhar, ele retoma exatamente de onde parou.
 - **🌳 AST-First Development**: Manipulação de código via **Tree-sitter** e **ast-grep**. Menos regex, mais precisão semântica.
 - **🔍 RAG Local de Alta Performance**: Integração com **LanceDB** para busca híbrida (vetorial + lexical) de contexto relevante.
 - **🛡️ Guardrails & HITL**: Pontos de aprovação humana (Human-In-The-Loop) para ações críticas e comandos perigosos.
-- **📊 Observabilidade Total**: Rastreamento completo via **OpenTelemetry** e logs estruturados JSONL com redação automática de segredos.
+- **📊 Observabilidade Total**: Dashboard integrado com token breakdown, custo estimado, latência e rastreamento de traces via **OpenTelemetry**.
+- **💻 Otimizado para VRAM Local (8GB)**: Compressão inteligente de contexto e suporte a modelos GGUF com KV Cache quantizado.
 
 ---
 
@@ -25,7 +26,7 @@ BFlow é um agente de software fundamentado no ciclo **ReAct (Observe-Think-Act-
 - **Vector DB**: LanceDB
 - **Tracing**: OpenTelemetry (SDK)
 - **Integrations**: Model Context Protocol (MCP)
-- **Providers**: Ollama (Local), OpenAI, Anthropic, OpenRouter
+- **Providers**: Ollama (Local), OpenAI, Anthropic, OpenRouter, LM Studio
 
 ---
 
@@ -33,7 +34,7 @@ BFlow é um agente de software fundamentado no ciclo **ReAct (Observe-Think-Act-
 
 ### Pré-requisitos
 - Node.js (v18+)
-- Ollama (opcional, para modelos locais como Qwen 2.5 Coder)
+- Ollama ou LM Studio (para execução local)
 
 ### Instalação
 ```bash
@@ -59,64 +60,56 @@ EMBEDDING_DIMENSIONS=768
 
 ### Comandos Principais
 
-#### Desenvolvimento
+#### 🖥️ Visual CLI (Recomendado)
+A melhor experiência interativa com progresso em tempo real e interface baseada em Ink:
 ```bash
-# Iniciar o agente em modo chat (desenvolvimento rápido)
-npm run dev chat
+# Iniciar interface visual com Ollama
+npm run vagent:ollama
 
-# Iniciar o agente com watch mode (recarrega ao salvar)
-npm run dev:agent chat
+# Iniciar interface visual com LM Studio
+npm run vagent:lmstudio
+```
+
+#### 🛠️ Desenvolvimento e Chat
+```bash
+# Iniciar o agente em modo chat CLI simples
+npm run dev chat
 
 # Iniciar o servidor de integração com IDE (Continue.dev)
 npm run dev:server
 ```
 
-#### Produção / Build
-```bash
-# Validar tipos e compilar
-npm run build
+---
 
-# Executar a partir do build
-node dist/cli.js chat
-```
+## ⚡ Otimização para 8GB VRAM
+Para rodar BFlow com performance máxima em hardware local limitado:
 
-### Integração MCP (Model Context Protocol)
-O agente suporta ferramentas externas via MCP. Configure seus servidores no arquivo `mcp-servers.json`:
-
-```json
-{
-  "mcpServers": {
-    "github": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-github"],
-      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "sua-token" }
-    }
-  }
-}
-```
-As ferramentas serão carregadas automaticamente com o prefixo do servidor (ex: `github_create_issue`).
+1. Use os scripts `.bat` otimizados (Windows):
+   - `qwen2.5-coder-7b-q8.bat`: Inicia o Qwen 2.5 Coder 7B com **KV Cache quantizado (4-bit)**.
+   - `Nemotron.bat`: Inicia o Nemotron Nano 9B v2.
+2. O agente utiliza **Smart Context Compaction**, reduzindo automaticamente o contexto para caber na VRAM sem perder decisões críticas.
 
 ---
 
 ## 📅 Roadmap & Progresso
 
-### ✅ O que já temos (Fases 1-5 & 9)
+### ✅ O que já temos (Fases 1-6 & 9)
 - [x] **Core ReAct**: Loop completo de Observar, Pensar, Agir e Verificar.
 - [x] **Gestão de Estado**: Checkpoints em disco e HITL funcional.
+- [x] **Multi-Agente Especializado**: Orquestração entre Coder, Reviewer, Tester e Debugger com **Feedback Loops** automáticos.
 - [x] **Tools de Código**: Leitura/Edição estrutural via AST e TS Language Service.
-- [x] **RAG Local**: Busca híbrida integrada ao Orchestrator.
-- [x] **Observabilidade**: Tracing com spans e Logging estruturado.
+- [x] **RAG Local**: Busca híbrida (LanceDB) integrada ao Orchestrator com reranking.
+- [x] **Observabilidade**: Dashboard de custos e traces OpenTelemetry.
 - [x] **Integração MCP**: Suporte a ferramentas externas (Slack, GitHub, etc) via protocolo MCP.
-- [x] **CLI**: Interface interativa para chat e inicialização.
+- [x] **Interface Visual**: Visual CLI (vagent) com feedback de progresso e tokens.
 
 ### ⏳ Em Andamento
-- [ ] **Fase 6**: Refinamento de loops de feedback (auto-correção de build/testes).
 - [ ] **Fase 7.1 (Parte 2)**: Expor APIs internas do SaaS como ferramentas MCP (MCP Server).
 
 ### 🚀 Futuro
 - [ ] Sandbox Docker para execução isolada de código.
 - [ ] Suporte a múltiplos repositórios e monorepos complexos.
-- [ ] Interface visual (Visual CLI) para acompanhamento de planos.
+- [ ] Suporte a Migrações de Banco de Dados automáticas com HITL.
 
 ---
 

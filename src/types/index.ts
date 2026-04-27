@@ -327,6 +327,7 @@ export const DEFAULT_TOOL_BUDGETS: Record<string, ToolBudget> = {
   tester:     { maxToolCalls: 30, maxTokens: 60_000, maxCostUsd: 0.30 },
   debug:      { maxToolCalls: 25, maxTokens: 50_000, maxCostUsd: 0.25 },
   docs:       { maxToolCalls: 15, maxTokens: 25_000, maxCostUsd: 0.10 },
+  migration:  { maxToolCalls: 20, maxTokens: 40_000, maxCostUsd: 0.20 },
   orchestrator: { maxToolCalls: 10, maxTokens: 20_000, maxCostUsd: 0.10 },
   default:    { maxToolCalls: 50, maxTokens: 100_000, maxCostUsd: 0.50 },
 };
@@ -499,7 +500,7 @@ export interface RetrievalResult {
   reasons: string[];
 }
 
-export type AgentRole = 'researcher' | 'planner' | 'orchestrator' | 'coder' | 'reviewer';
+export type AgentRole = 'researcher' | 'planner' | 'orchestrator' | 'coder' | 'reviewer' | 'tester' | 'debug' | 'docs' | 'migration';
 
 export interface ResearchBrief {
   taskType: 'bugfix' | 'feature' | 'refactor' | 'test' | 'investigation' | 'documentation';
