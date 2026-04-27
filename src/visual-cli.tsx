@@ -13,7 +13,6 @@ import { App } from './ui/App.js';
 import { loadEnv } from './utils/env.js';
 import { loadConfig } from './utils/config.js';
 import { runRepl } from './cli/repl.js';
-import { OrchestratorAgent as OrchestratorAgentType } from './agent/orchestrator.js';
 
 // Load environment variables from .env file manually
 loadEnv();

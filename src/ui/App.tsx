@@ -114,7 +114,7 @@ export const App = ({ orchestrator, initialTask = '', initialState, modelName, p
             if (c) setMessages(p => [...p, { role: '🤖', content: c, timestamp: now(), tokens: e.usage?.totalTokens }].slice(-50));
             if (e.usage) { setTokens(e.usage.totalTokens); setLatency(e.latencyMs || 0); }
           } else if (e.role === 'system' && e.content?.includes('RESUMO FINAL')) {
-            setResult(clip(e.content.replace('RESUMO FINAL:', '').trim(), 300));
+            setResult(e.content.replace('RESUMO FINAL:', '').trim());
           }
           break;
         case 'usage_update': setTokens(e.usage.totalTokens); break;
@@ -136,7 +136,13 @@ export const App = ({ orchestrator, initialTask = '', initialState, modelName, p
     setStatus('running');
     setRunning(true);
     setShowInput(false);
-    orchestrator.run(t).then(() => { setRunning(false); setShowInput(true); });
+    orchestrator.run(t)
+      .catch(err => {
+        setStatus('error');
+        setError(err.message);
+        setRunning(false);
+        setShowInput(true);
+      });
   }, []);
 
   useInput((input, key) => {
@@ -196,7 +202,7 @@ export const App = ({ orchestrator, initialTask = '', initialState, modelName, p
       {(result || error) && (
         <Box flexDirection="column" marginY={1} borderStyle="round" borderColor={error ? 'red' : 'green'} padding={1}>
           <Text bold color={error ? 'red' : 'green'}>{error ? 'Erro' : 'Resultado'}</Text>
-          <Text>{clip(error || result, W - 10)}</Text>
+          <Text wrap="wrap">{error || result}</Text>
         </Box>
       )}
 
@@ -242,7 +248,13 @@ export const App = ({ orchestrator, initialTask = '', initialState, modelName, p
               if (!t) return;
               setTask(t); setInput(''); setStatus('running'); setRunning(true); setShowInput(false);
               setMessages([]); setResult(''); setError(''); setCompleted([]); setPhase('Research');
-              orchestrator.run(t).then(() => { setRunning(false); setShowInput(true); });
+              orchestrator.run(t)
+                .catch(err => {
+                  setStatus('error');
+                  setError(err.message);
+                  setRunning(false);
+                  setShowInput(true);
+                });
             }}
             placeholder="Descreva a tarefa e pressione Enter…"
           />

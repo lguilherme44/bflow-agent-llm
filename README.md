@@ -13,8 +13,9 @@ BFlow é um agente de software fundamentado no ciclo **ReAct (Observe-Think-Act-
 - **🌳 AST-First Development**: Manipulação de código via **Tree-sitter** e **ast-grep**. Menos regex, mais precisão semântica.
 - **🔍 RAG Local de Alta Performance**: Integração com **LanceDB** para busca híbrida (vetorial + lexical) de contexto relevante.
 - **🛡️ Guardrails & HITL**: Pontos de aprovação humana (Human-In-The-Loop) para ações críticas e comandos perigosos.
-- **📊 Observabilidade Total**: Dashboard integrado com token breakdown, custo estimado, latência e rastreamento de traces via **OpenTelemetry**.
+- **📊 Observabilidade Total**: Dashboard integrado com token breakdown, custo estimado, latência e traces via **OpenTelemetry**.
 - **💻 Otimizado para VRAM Local (8GB)**: Compressão inteligente de contexto e suporte a modelos GGUF com KV Cache quantizado.
+- **⚙️ Configuração Dinâmica**: Gerenciamento de conexão simplificado via `.agentrc` e comando interativo `/connect`.
 
 ---
 
@@ -43,31 +44,20 @@ cd bflow-agent-llm
 npm install
 ```
 
-### Configuração
-Crie um arquivo `.env` na raiz:
-```env
-### AGENTE LLM (Opcional usar OpenAI/LMStudio na porta 11434)
-AGENT_LLM_PROVIDER=ollama
-AGENT_LLM_MODEL=qwen2.5-coder
-AGENT_LLM_BASE_URL=http://localhost:11434
-
-### Embeddings
-OLLAMA_EMBED_MODEL=nomic-embed-text
-OLLAMA_BASE_URL=http://127.0.0.1:11434
-EMBEDDING_PROVIDER=ollama
-EMBEDDING_DIMENSIONS=768
+### Configuração (Recomendado)
+Não é necessário configurar o `.env` manualmente para o LLM. Use o assistente interativo:
+```bash
+npm run vagent -- --connect
 ```
+Isso criará o arquivo `.agentrc` com suas preferências de modelo, provedor e chaves de API.
 
 ### Comandos Principais
 
 #### 🖥️ Visual CLI (Recomendado)
 A melhor experiência interativa com progresso em tempo real e interface baseada em Ink:
 ```bash
-# Iniciar interface visual com Ollama
-npm run vagent:ollama
-
-# Iniciar interface visual com LM Studio
-npm run vagent:lmstudio
+# Iniciar interface visual
+npm run vagent
 ```
 
 #### 🛠️ Desenvolvimento e Chat
@@ -75,8 +65,8 @@ npm run vagent:lmstudio
 # Iniciar o agente em modo chat CLI simples
 npm run dev chat
 
-# Iniciar o servidor de integração com IDE (Continue.dev)
-npm run dev:server
+# Dentro do chat, use /connect para trocar de modelo
+# /status para ver a conexão atual
 ```
 
 ---
@@ -96,11 +86,12 @@ Para rodar BFlow com performance máxima em hardware local limitado:
 ### ✅ O que já temos (Fases 1-6 & 9)
 - [x] **Core ReAct**: Loop completo de Observar, Pensar, Agir e Verificar.
 - [x] **Gestão de Estado**: Checkpoints em disco e HITL funcional.
-- [x] **Multi-Agente Especializado**: Orquestração entre Coder, Reviewer, Tester e Debugger com **Feedback Loops** automáticos.
+- [x] **Multi-Agente Especializado**: Orquestração entre sub-agentes com **Feedback Loops**.
+- [x] **Config-First Workflow**: Configuração via `/connect` e persistência em `.agentrc`.
 - [x] **Tools de Código**: Leitura/Edição estrutural via AST e TS Language Service.
-- [x] **RAG Local**: Busca híbrida (LanceDB) integrada ao Orchestrator com reranking.
+- [x] **RAG Local**: Busca híbrida (LanceDB) integrada ao Orchestrator.
 - [x] **Observabilidade**: Dashboard de custos e traces OpenTelemetry.
-- [x] **Integração MCP**: Suporte a ferramentas externas (Slack, GitHub, etc) via protocolo MCP.
+- [x] **Integração MCP**: Suporte a ferramentas externas via protocolo MCP.
 - [x] **Interface Visual**: Visual CLI (vagent) com feedback de progresso e tokens.
 
 ### ⏳ Em Andamento

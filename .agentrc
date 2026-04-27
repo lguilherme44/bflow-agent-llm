@@ -1,8 +1,8 @@
 {
-  "provider": "lmstudio",
-  "model": "nemotron-nano",
-  "baseUrl": "http://localhost:1234/v1",
-  "temperature": 0.2,
-  "maxTokens": 2048,
+  "provider": "ollama",
+  "model": "qwen2.5-coder:latest",
+  "baseUrl": "http://localhot:1234/v1",
+  "temperature": 1,
+  "maxTokens": 16384,
   "sandbox": "auto"
 }

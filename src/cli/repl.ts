@@ -139,6 +139,16 @@ export async function runRepl(
         model = await rl.question('Modelo (deixe em branco para o padrão): ');
       }
 
+      let baseUrl = await rl.question('Base URL (deixe em branco para o padrão): ');
+      if (!baseUrl) {
+        if (provider === 'ollama') baseUrl = 'http://localhost:11434';
+        else if (provider === 'lmstudio') baseUrl = 'http://localhost:1234/v1';
+      }
+      
+      const newConfig: Partial<AgentConfig> = { provider };
+      if (model) newConfig.model = model;
+      if (baseUrl) newConfig.baseUrl = baseUrl;
+
       let apiKey = '';
       if (['openai', 'anthropic', 'openrouter'].includes(provider)) {
         console.log(picocolors.yellow(`\nProvider ${provider} requer uma API Key.`));
@@ -148,9 +158,6 @@ export async function runRepl(
       const temperature = await rl.question('Temperatura (0.0 a 1.0, padrão 0.2): ');
       const maxTokens = await rl.question('Max Tokens (padrão 2048): ');
 
-      const newConfig: Partial<AgentConfig> = { provider };
-      if (model) newConfig.model = model;
-      if (baseUrl) newConfig.baseUrl = baseUrl;
       if (apiKey) newConfig.apiKey = apiKey;
       if (temperature) newConfig.temperature = parseFloat(temperature);
       if (maxTokens) newConfig.maxTokens = parseInt(maxTokens);

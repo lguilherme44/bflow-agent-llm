@@ -118,6 +118,7 @@ Status atualizado em 2026-04-22:
 - [x] Fase 9.1 e 9.2 implementadas: CLI Interativa (`agent chat`) e inicializao (`agent init`).
 - [x] Fase 9.3 e 9.4 implementadas: Interface Visual (TUI) com Ink, listagem e retomada de sessoes.
 - [x] NOVO: Comando `/connect` interativo com suporte a selecao e download de modelos locais (Ollama/LM Studio).
+- [x] NOVO: Fluxo Config-First (prioridade `.agentrc`, suporte a API Keys no `/connect`, flag `--connect` no vagent).
 - [x] NOVO: Trava de Seguranca (Safety Lock) no Orquestrador para aprovacao humana do plano de execucao.
 
 ### ✅ O que já temos (Fases 1-6 & 9)
@@ -127,8 +128,8 @@ Status atualizado em 2026-04-22:
 - [x] **Tools de Código**: Leitura/Edição estrutural via AST.
 - [x] **RAG Local**: Busca híbrida integrada ao Orchestrator.
 - [x] **Observabilidade**: Tracing com spans e Dashboard de tokens/custo.
-- [x] **Integração MCP**: Suporte a ferramentas externas via MCP.
-- [x] **CLI & Visual CLI**: Interface interativa e progresso visual.
+- [x] **Config-First Workflow**: Configuração via `/connect` e persistência em `.agentrc`.
+- [x] **CLI & Visual CLI**: Interface interativa e progresso visual com suporte a `--connect`.
 
 ## 0. Base Tecnica e Build
 
