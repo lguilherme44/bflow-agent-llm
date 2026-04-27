@@ -40,60 +40,75 @@ export class MCPManager {
 
   async connectAll(): Promise<void> {
     if (!this.config) return;
-
-    for (const [name, serverConfig] of Object.entries(this.config.mcpServers)) {
-      try {
-        let transport;
-        if (serverConfig.url) {
-          transport = new SSEClientTransport(new URL(serverConfig.url));
-        } else if (serverConfig.command) {
-          const env: Record<string, string> = {};
-          // Copiar variáveis do processo (filtrando as que são undefined)
-          for (const [key, value] of Object.entries(process.env)) {
-            if (value !== undefined) env[key] = value;
-          }
-          // Sobrescrever com variáveis da config
-          if (serverConfig.env) {
-            for (const [key, value] of Object.entries(serverConfig.env)) {
-              env[key] = value;
-            }
-          }
-
-          transport = new StdioClientTransport({
-            command: serverConfig.command,
-            args: serverConfig.args || [],
-            env
-          });
-        } else {
-          this.logger?.logEvent('system', 'mcp_server_skip', { name, reason: 'Servidor MCP sem comando ou URL' });
-          continue;
-        }
-
-        const client = new Client(
-          { name: "bflow-agent-client", version: "1.0.0" },
-          { capabilities: {} }
-        );
-
-        await client.connect(transport);
-        this.clients.set(name, client);
-        this.logger?.logEvent('system', 'mcp_server_connected', { name });
-      } catch (error: any) {
-        this.logger?.logEvent('system', 'mcp_server_error', { name, error: error.message });
-      }
+    for (const name of Object.keys(this.config.mcpServers)) {
+      await this.connectServer(name);
     }
+  }
+
+  /** Lazy-connect to a specific MCP server on first use */
+  async connectServer(name: string): Promise<void> {
+    if (!this.config || this.clients.has(name)) return;
+    const serverConfig = this.config.mcpServers[name];
+    if (!serverConfig) return;
+
+    try {
+      let transport;
+      if (serverConfig.url) {
+        transport = new SSEClientTransport(new URL(serverConfig.url));
+      } else if (serverConfig.command) {
+        const env: Record<string, string> = {};
+        for (const [key, value] of Object.entries(process.env)) {
+          if (value !== undefined) env[key] = value;
+        }
+        if (serverConfig.env) {
+          for (const [key, value] of Object.entries(serverConfig.env)) {
+            env[key] = value;
+          }
+        }
+        transport = new StdioClientTransport({
+          command: serverConfig.command,
+          args: serverConfig.args || [],
+          env: { ...env, NODE_NO_WARNINGS: '1' },
+        });
+      } else {
+        return;
+      }
+
+      const client = new Client(
+        { name: "bflow-agent-client", version: "1.0.0" },
+        { capabilities: {} }
+      );
+      await client.connect(transport);
+      this.clients.set(name, client);
+    } catch (error: any) {
+      // Silently skip — connector may not have deps installed
+    }
+  }
+
+  /** Get available tool names WITHOUT connecting (cheap) */
+  getAvailableToolNames(): string[] {
+    if (!this.config) return [];
+    return Object.keys(this.config.mcpServers);
   }
 
   async getAllTools(): Promise<ToolDefinition[]> {
     const allTools: ToolDefinition[] = [];
 
-    for (const [serverName, client] of this.clients.entries()) {
+    for (const serverName of Object.keys(this.config?.mcpServers || {})) {
       try {
+        // Lazy connect
+        if (!this.clients.has(serverName)) {
+          await this.connectServer(serverName);
+        }
+        const client = this.clients.get(serverName);
+        if (!client) continue;
+
         const response = await client.listTools();
         for (const mcpTool of response.tools) {
           allTools.push(this.mapMCPToolToDefinition(serverName, client, mcpTool));
         }
       } catch (error: any) {
-        this.logger?.logEvent('system', 'mcp_tool_list_error', { serverName, error: error.message });
+        // Silently skip unavailable servers
       }
     }
 

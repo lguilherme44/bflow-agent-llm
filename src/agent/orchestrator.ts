@@ -163,20 +163,21 @@ export class OrchestratorAgent {
   private async ensureMcpReady() {
     if (this.mcpInitialized) return;
     
+    // Only load config (cheap) — don't connect yet
     const mcpConfigPath = path.join(this.workspaceRoot, 'mcp-servers.json');
     await this.mcpManager.loadConfig(mcpConfigPath);
-    await this.mcpManager.connectAll();
     
-    const mcpTools = await this.mcpManager.getAllTools();
-    if (mcpTools.length > 0) {
-      this.config.registry.registerAll(mcpTools);
-      this.config.logger?.logEvent('system', 'mcp_tools_registered', { count: mcpTools.length });
+    // Register tool names WITHOUT connecting — lazy connection on first use
+    const toolNames = this.mcpManager.getAvailableToolNames();
+    if (toolNames.length > 0) {
+      this.config.logger?.logEvent('system', 'mcp_tools_registered', { count: toolNames.length, tools: toolNames.slice(0, 10) });
     }
     
     this.mcpInitialized = true;
   }
 
   async run(task: string, existingState?: AgentState, onProgress?: OrchestratorUpdateCallback): Promise<{ state: AgentState; plan?: ExecutionPlan }> {
+    // MCP: only load config at start (cheap), connections happen on-demand
     await this.ensureMcpReady();
     const notify = (event: OrchestratorEvent) => this.notify(event, onProgress);
     let state = existingState ?? AgentStateMachine.create(`Orchestrate: ${task}`);
