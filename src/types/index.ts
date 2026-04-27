@@ -126,6 +126,12 @@ export interface AgentMessage {
   toolCalls?: ToolCall[];
   toolResult?: ToolResult;
   timestamp: string;
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    reasoningTokens?: number;
+  };
 }
 
 export interface HumanApprovalRequest {

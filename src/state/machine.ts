@@ -61,7 +61,7 @@ export class AgentStateMachine {
     },
   };
 
-  static create(task: string, maxIterations = 25): AgentState {
+  static create(task: string, maxIterations = 100): AgentState {
     const now = new Date().toISOString();
     const userMessage: AgentMessage = {
       role: 'user',

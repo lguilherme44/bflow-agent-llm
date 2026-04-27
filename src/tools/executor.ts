@@ -65,7 +65,7 @@ export class ToolExecutor {
       retryMaxDelayMs: 5_000,
       retryJitterRatio: 0.2,
       enableRollback: true,
-      maxIterations: 10,
+      maxIterations: 100,
       ...config,
     };
     this.hooks = hooks ?? {};

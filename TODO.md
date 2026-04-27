@@ -764,23 +764,13 @@ Pronto quando: o agente melhora a propria saida dentro de limites claros.
 - [ ] Definir estratégia explicitas de autenticação (OAuth/tokens de serviço por ambiente).
 - [ ] Gerenciamento de credenciais via Vault/Secrets Manager.
 
-### 7.1 Criar MCP Server para o SaaS
-
-- [ ] Expor APIs internas como tools padronizadas.
-- [ ] Documentar schema para o LLM consumir.
-- [ ] Autenticacao segura para tools internas.
-- [ ] Permissoes por ambiente:
-  - [ ] local
-  - [ ] staging
-  - [ ] production
-- [ ] HITL obrigatorio para operacoes em production.
-- [ ] Criar tools MCP:
-  - [ ] consultar usuario/tenant
-  - [ ] consultar logs de app
-  - [ ] consultar feature flags
-  - [ ] consultar metricas
-  - [ ] consultar jobs/filas
-- [ ] Registrar auditoria de toda chamada MCP.
+### 7.1 Integração MCP (Model Context Protocol)
+- [x] Implementado Suporte a **MCP Client** no core do agente.
+- [x] Criado `MCPManager` para gerenciar conexões via `stdio` e `sse`.
+- [x] Suporte a configuração dinâmica via `mcp-servers.json`.
+- [x] Registro automático de ferramentas MCP no `ToolRegistry` (com prefixo por servidor).
+- [x] Testes de integração automatizados com Mock MCP Server.
+- [ ] Expor APIs internas como tools padronizadas (MCP Server para o SaaS).
 
 Pronto quando: o agente pode interagir com o SaaS por contrato seguro, nao por hacks ad hoc.
 

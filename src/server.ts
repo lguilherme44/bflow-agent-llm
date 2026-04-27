@@ -118,8 +118,26 @@ const server = http.createServer(async (req, res) => {
 
   if (url === '/api/traces' && req.method === 'GET') {
     const spans = tracing.getFinishedSpans();
+    // Sanitização para evitar erros de serialização (BigInt, circularidade)
+    const sanitizedSpans = spans.map(span => ({
+      name: span.name,
+      context: span.spanContext(),
+      parentSpanId: span.parentSpanId,
+      kind: span.kind,
+      startTime: span.startTime,
+      endTime: span.endTime,
+      attributes: span.attributes,
+      status: span.status,
+      events: span.events,
+      duration: [
+        span.endTime[0] - span.startTime[0],
+        span.endTime[1] - span.startTime[1]
+      ]
+    }));
     res.writeHead(200, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify(spans));
+    res.end(JSON.stringify(sanitizedSpans, (_key, value) => 
+      typeof value === 'bigint' ? value.toString() : value
+    ));
     return;
   }
 
@@ -132,6 +150,7 @@ const server = http.createServer(async (req, res) => {
       try {
         const payload = JSON.parse(body);
         const lastMessage = payload.messages[payload.messages.length - 1]?.content;
+        const stream = payload.stream === true;
 
         if (!lastMessage) {
           res.writeHead(400);
@@ -139,37 +158,83 @@ const server = http.createServer(async (req, res) => {
           return;
         }
 
-        console.log(`[SERVER] Recebida tarefa: ${lastMessage}`);
+        console.log(`[SERVER] Recebida tarefa: ${lastMessage} (Stream: ${stream})`);
         
-        // Rodar o agente
-        const result = await orchestrator.run(lastMessage);
-        const finalContent = result.state.messages
-          .filter(m => m.role === 'assistant')
-          .at(-1)?.content || 'Tarefa concluída sem resposta textual.';
+        const chatId = `chatcmpl-${Date.now()}`;
+        
+        if (stream) {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+          });
 
-        // Formato OpenAI
-        const response = {
-          id: `chatcmpl-${Date.now()}`,
-          object: 'chat.completion',
-          created: Math.floor(Date.now() / 1000),
-          model: provider.defaultModel,
-          choices: [{
-            index: 0,
-            message: {
-              role: 'assistant',
-              content: finalContent
-            },
-            finish_reason: 'stop'
-          }],
-          usage: {
-            prompt_tokens: 0,
-            completion_tokens: 0,
-            total_tokens: result.state.metadata.totalTokensUsed
-          }
-        };
+          const sendChunk = (content: string, finishReason: string | null = null) => {
+            const chunk = {
+              id: chatId,
+              object: 'chat.completion.chunk',
+              created: Math.floor(Date.now() / 1000),
+              model: provider.defaultModel,
+              choices: [{
+                index: 0,
+                delta: content ? { content } : {},
+                finish_reason: finishReason
+              }]
+            };
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+          };
 
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify(response));
+          // Rodar o agente com callback de streaming
+          await orchestrator.run(lastMessage, undefined, (event) => {
+            if (event.type === 'phase_start') {
+              sendChunk(`\n> **Fase: ${event.phase}**\n\n`);
+            } else if (event.type === 'message_added') {
+              if (event.role === 'assistant') {
+                sendChunk(event.content);
+              } else if (event.role === 'system' || event.role === 'tool') {
+                // Opcional: mostrar logs técnicos formatados como blockquote ou similar
+                // sendChunk(`\n> _${event.content}_\n\n`);
+              }
+            } else if (event.type === 'error') {
+              sendChunk(`\n\n❌ **Erro: ${event.message}**\n`);
+            }
+          });
+
+          // Se a orquestração terminou mas não enviamos nada (ou queremos garantir o final)
+          sendChunk('', 'stop');
+          res.write('data: [DONE]\n\n');
+          res.end();
+        } else {
+          // Rodar o agente (Modo síncrono)
+          const result = await orchestrator.run(lastMessage);
+          const finalContent = result.state.messages
+            .filter(m => m.role === 'assistant')
+            .at(-1)?.content || 'Tarefa concluída sem resposta textual.';
+
+          // Formato OpenAI
+          const response = {
+            id: chatId,
+            object: 'chat.completion',
+            created: Math.floor(Date.now() / 1000),
+            model: provider.defaultModel,
+            choices: [{
+              index: 0,
+              message: {
+                role: 'assistant',
+                content: finalContent
+              },
+              finish_reason: 'stop'
+            }],
+            usage: {
+              prompt_tokens: 0,
+              completion_tokens: 0,
+              total_tokens: result.state.metadata.totalTokensUsed
+            }
+          };
+
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(response));
+        }
       } catch (error: any) {
         console.error('[SERVER] Erro no processamento:', error);
         res.writeHead(500);

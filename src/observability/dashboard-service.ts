@@ -93,7 +93,7 @@ export class DashboardService {
     const startEvent = logs.find(l => l.type === 'event' && l.payload.event === 'orchestrator_started');
     const endEvent = logs.find(l => 
         l.type === 'event' && 
-        ['orchestrator_completed', 'error', 'task_completed', 'task_failed'].includes(l.payload.event as string)
+        ['orchestrator_completed', 'error', 'task_completed', 'task_failed', 'phase_completed'].includes(l.payload.event as string)
     );
     
     const lastUpdate = new Date(logs[logs.length - 1].timestamp).getTime();
@@ -102,7 +102,11 @@ export class DashboardService {
     let status: 'completed' | 'error' | 'in_progress' = 'in_progress';
     if (endEvent) {
         const event = endEvent.payload.event as string;
-        status = (event === 'orchestrator_completed' || event === 'task_completed') ? 'completed' : 'error';
+        if (event === 'orchestrator_completed' || event === 'task_completed' || event === 'phase_completed') {
+            status = 'completed';
+        } else if (event === 'error' || event === 'task_failed') {
+            status = 'error';
+        }
     } else if (isOld) {
         status = 'completed'; // Assume completed if inactive for a long time
     }

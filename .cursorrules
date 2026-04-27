@@ -1,0 +1,20 @@
+# AI Coding Assistant Rules
+
+As an AI coding assistant in this project, you MUST follow these verification steps before finalizing ANY task:
+
+## 1. Quality Assurance Checklist
+- [ ] **Type Check**: Always run `npm run typecheck` (or `node ./node_modules/typescript/bin/tsc --noEmit` if there are script policy issues) to ensure no type regressions were introduced.
+- [ ] **Tests**: Run `npm test` if the changes affect core logic or if new tests were added. Ensure all tests pass.
+- [ ] **Build**: Run `npm run build` to verify that the project still compiles correctly.
+- [ ] **Lint**: Ensure the code follows the project's style guidelines (if applicable).
+- [ ] **Documentation**: Always ASK the user if they want the `README.md` updated to reflect the new feature or changes. Do not assume it's unnecessary.
+
+## 2. Rule Enforcement
+- NEVER consider a task "finished" or "complete" without performing at least the **Type Check**.
+- If a verification step fails, you MUST fix the errors and run the check again.
+- Document the verification results in your final summary to the user.
+
+## 3. Environment Context
+- When running commands on Windows, if `npm` or `npx` scripts fail due to execution policies, use direct node calls (e.g., `node node_modules/typescript/bin/tsc`).
+
+*This rule was established to prevent regressions and ensure code quality in the Agent OS project.*

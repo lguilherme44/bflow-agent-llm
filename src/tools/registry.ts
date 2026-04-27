@@ -10,6 +10,12 @@ export class ToolRegistry {
     this.tools.set(tool.schema.name, tool);
   }
 
+  registerAll(tools: ToolDefinition[]): void {
+    for (const tool of tools) {
+      this.register(tool);
+    }
+  }
+
   get(name: string): ToolDefinition | undefined {
     return this.tools.get(name);
   }

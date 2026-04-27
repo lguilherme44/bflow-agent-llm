@@ -24,6 +24,7 @@ BFlow é um agente de software fundamentado no ciclo **ReAct (Observe-Think-Act-
 - **Refactoring**: ast-grep
 - **Vector DB**: LanceDB
 - **Tracing**: OpenTelemetry (SDK)
+- **Integrations**: Model Context Protocol (MCP)
 - **Providers**: Ollama (Local), OpenAI, Anthropic, OpenRouter
 
 ---
@@ -79,6 +80,22 @@ npm run build
 node dist/cli.js chat
 ```
 
+### Integração MCP (Model Context Protocol)
+O agente suporta ferramentas externas via MCP. Configure seus servidores no arquivo `mcp-servers.json`:
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "npx",
+      "args": ["-y", "@modelcontextprotocol/server-github"],
+      "env": { "GITHUB_PERSONAL_ACCESS_TOKEN": "sua-token" }
+    }
+  }
+}
+```
+As ferramentas serão carregadas automaticamente com o prefixo do servidor (ex: `github_create_issue`).
+
 ---
 
 ## 📅 Roadmap & Progresso
@@ -89,11 +106,12 @@ node dist/cli.js chat
 - [x] **Tools de Código**: Leitura/Edição estrutural via AST e TS Language Service.
 - [x] **RAG Local**: Busca híbrida integrada ao Orchestrator.
 - [x] **Observabilidade**: Tracing com spans e Logging estruturado.
+- [x] **Integração MCP**: Suporte a ferramentas externas (Slack, GitHub, etc) via protocolo MCP.
 - [x] **CLI**: Interface interativa para chat e inicialização.
 
 ### ⏳ Em Andamento
 - [ ] **Fase 6**: Refinamento de loops de feedback (auto-correção de build/testes).
-- [ ] **Fase 7**: Integração com ferramentas externas via MCP (Model Context Protocol).
+- [ ] **Fase 7.1 (Parte 2)**: Expor APIs internas do SaaS como ferramentas MCP (MCP Server).
 
 ### 🚀 Futuro
 - [ ] Sandbox Docker para execução isolada de código.

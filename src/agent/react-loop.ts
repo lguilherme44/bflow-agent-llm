@@ -239,7 +239,7 @@ export class ReActAgent {
             timestamp: new Date().toISOString(),
           });
 
-          if (state.metadata.iterationCount >= (this.config.executorConfig?.maxIterations ?? 10)) {
+          if (state.metadata.iterationCount >= (this.config.executorConfig?.maxIterations ?? 100)) {
             state = AgentStateMachine.fail(state, 'Máximo de iterações atingido sem conclusão ou uso de ferramentas.');
             break;
           }

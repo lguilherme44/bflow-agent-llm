@@ -1,4 +1,5 @@
 import { ReActAgent, ReActConfig } from './react-loop.js';
+import path from 'path';
 import { AgentState, ExecutionPlan, ExecutionStream, FeedbackIteration, FeedbackLoopPolicy, ResearchBrief } from '../types/index.js';
 import { ResearchAgent } from './research.js';
 import { PlanningAgent } from './planning.js';
@@ -19,6 +20,8 @@ import {
 import { WorkspaceManager } from '../code/workspace-manager.js';
 import { TerminalService } from '../code/terminal-service.js';
 import { HookService } from './hook-service.js';
+import { MCPManager } from '../mcp/mcp-manager.js';
+import { ExperienceManager } from '../state/experience-manager.js';
 
 export type OrchestratorEvent = 
   | { type: 'phase_start'; phase: string }
@@ -52,6 +55,9 @@ export class OrchestratorAgent {
   private fallbackHumanApprovalCallback?: ReActConfig['humanApprovalCallback'];
   private hookService: HookService;
   private autoApprove: boolean = false;
+  private mcpManager: MCPManager;
+  private mcpInitialized: boolean = false;
+  private experienceManager: ExperienceManager;
 
   constructor(private config: ReActConfig, feedbackPolicy?: Partial<FeedbackLoopPolicy>) {
     const languageInstruction = "\n\nIMPORTANT: Always respond in the same language as the user's prompt. If the user speaks Portuguese, you MUST respond in Portuguese.";
@@ -68,6 +74,8 @@ export class OrchestratorAgent {
     this.hookService = new HookService(this.workspaceRoot);
     const terminal = new TerminalService(this.workspaceRoot, { sandboxMode: this.config.sandboxMode });
     this.workspaceManager = new WorkspaceManager(this.workspaceRoot, terminal);
+    this.mcpManager = new MCPManager(this.config.logger);
+    this.experienceManager = new ExperienceManager(this.workspaceRoot);
     this.liveConfig = {
         ...this.config,
         onUpdate: (event) => {
@@ -138,16 +146,35 @@ export class OrchestratorAgent {
     }
   }
 
-  private notify(event: OrchestratorEvent) {
+  private notify(event: OrchestratorEvent, onProgress?: OrchestratorUpdateCallback) {
     this.onUpdate?.(event);
+    onProgress?.(event);
   }
 
-  private updateUsage(state: AgentState) {
+  private updateUsage(state: AgentState, onProgress?: OrchestratorUpdateCallback) {
     this.totalUsage.totalTokens = state.metadata.totalTokensUsed || 0;
-    this.notify({ type: 'usage_update', usage: this.totalUsage });
+    this.notify({ type: 'usage_update', usage: this.totalUsage }, onProgress);
   }
 
-  async run(task: string, existingState?: AgentState): Promise<{ state: AgentState; plan?: ExecutionPlan }> {
+  private async ensureMcpReady() {
+    if (this.mcpInitialized) return;
+    
+    const mcpConfigPath = path.join(this.workspaceRoot, 'mcp-servers.json');
+    await this.mcpManager.loadConfig(mcpConfigPath);
+    await this.mcpManager.connectAll();
+    
+    const mcpTools = await this.mcpManager.getAllTools();
+    if (mcpTools.length > 0) {
+      this.config.registry.registerAll(mcpTools);
+      this.config.logger?.logEvent('system', 'mcp_tools_registered', { count: mcpTools.length });
+    }
+    
+    this.mcpInitialized = true;
+  }
+
+  async run(task: string, existingState?: AgentState, onProgress?: OrchestratorUpdateCallback): Promise<{ state: AgentState; plan?: ExecutionPlan }> {
+    await this.ensureMcpReady();
+    const notify = (event: OrchestratorEvent) => this.notify(event, onProgress);
     let state = existingState ?? AgentStateMachine.create(`Orchestrate: ${task}`);
     
     const tracing = this.config.tracing;
@@ -156,6 +183,18 @@ export class OrchestratorAgent {
     
     logger?.logEvent(state.id, 'orchestrator_started', { task });
     state = AgentStateMachine.dispatch(state, { type: 'task_started' });
+
+    // Busca experiências passadas similares (Auto-Learning)
+    const similarExperiences = await this.experienceManager.searchSimilar(task, 1);
+    if (similarExperiences.length > 0) {
+        const experience = similarExperiences[0];
+        const experienceContext = `\n### EXPERIÊNCIA PASSADA SIMILAR:\nTarefa anterior: "${experience.task}"\nResultado: Sucesso. Use essa experiência para guiar sua estratégia atual.\n`;
+        this.config.llmConfig = {
+            ...this.config.llmConfig,
+            systemPrompt: (this.config.llmConfig?.systemPrompt || '') + experienceContext
+        };
+        logger?.logEvent(state.id, 'experience_retrieved', { traceId: experience.traceId });
+    }
 
     // --- ETAPA: CLASSIFICAÇÃO DE INTENÇÃO (Otimizada para economizar tokens e tempo) ---
     const intentSpan = tracing?.startPhaseSpan('Intent Classification', orchestratorSpan);
@@ -190,7 +229,7 @@ export class OrchestratorAgent {
 
     if (intent === 'CHAT' || intent === 'DIRECT') {
         const phase = intent === 'CHAT' ? 'Chat' : 'Resposta Direta';
-        this.notify({ type: 'phase_start', phase });
+        notify({ type: 'phase_start', phase });
         
         const systemPrompt = intent === 'CHAT' 
           ? 'Você é um assistente amigável. Responda de forma natural e concisa.'
@@ -202,8 +241,8 @@ export class OrchestratorAgent {
         ], this.config.llmConfig);
 
         this.totalUsage.totalTokens += chatResponse.usage.totalTokens;
-        this.notify({ type: 'usage_update', usage: this.totalUsage });
-        this.notify({ 
+        notify({ type: 'usage_update', usage: this.totalUsage });
+        notify({ 
           type: 'message_added', 
           role: 'assistant', 
           content: chatResponse.content,
@@ -211,8 +250,12 @@ export class OrchestratorAgent {
           latencyMs: chatResponse.latencyMs
         });
         
-        this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${chatResponse.content}` });
-        this.notify({ type: 'phase_complete', phase: 'Finalized' });
+        state = AgentStateMachine.addMessage(state, {
+            role: 'assistant',
+            content: chatResponse.content,
+            timestamp: new Date().toISOString(),
+            usage: chatResponse.usage
+        });
         
         state = AgentStateMachine.complete(state, chatResponse.content);
         logger?.logEvent(state.id, 'phase_completed', { phase, content: chatResponse.content });
@@ -220,68 +263,78 @@ export class OrchestratorAgent {
     }
 
     // --- FLUXO NORMAL DE TAREFA ---
-    this.notify({ type: 'phase_start', phase: 'Research' });
-    this.notify({ type: 'message_added', role: 'system', content: 'Iniciando fase de pesquisa...' });
+    notify({ type: 'phase_start', phase: 'Research' });
+    notify({ type: 'message_added', role: 'system', content: 'Iniciando fase de pesquisa...' });
     logger?.logEvent(state.id, 'phase_started', { phase: 'Research' });
     
     const researchSpan = tracing?.startPhaseSpan('Research', orchestratorSpan);
-    const researchResult = await this.researchAgent.run(task, undefined, researchSpan);
-    const postResearchState = researchResult.state;
-    const brief = researchResult.brief;
+    let researchResult;
+    let brief: ResearchBrief | null = null;
+    try {
+        researchResult = await this.researchAgent.run(task, undefined, researchSpan);
+        state = researchResult.state;
+        brief = researchResult.brief;
 
-    this.updateUsage(postResearchState);
+        this.updateUsage(state, onProgress);
 
-    if (!brief) {
-      const error = postResearchState.status === 'error' ? postResearchState.metadata.errorMessage : 'Falha ao gerar ResearchBrief.';
-      state = AgentStateMachine.fail(postResearchState, error || 'Erro desconhecido na pesquisa');
-      this.notify({ type: 'error', message: error || 'Erro desconhecido na pesquisa' });
-      
-      researchSpan?.setStatus({ code: 2, message: error || 'Research brief missing' });
-      researchSpan?.end();
-      orchestratorSpan?.setStatus({ code: 2, message: 'Orchestration failed in Research phase' });
-      orchestratorSpan?.end();
-      
-      return { state };
+        if (!brief) {
+          const error = state.status === 'error' ? state.metadata.errorMessage : 'Falha ao gerar ResearchBrief.';
+          state = AgentStateMachine.fail(state, error || 'Erro desconhecido na pesquisa');
+          notify({ type: 'error', message: error || 'Erro desconhecido na pesquisa' });
+          
+          researchSpan?.setStatus({ code: 2, message: error || 'Research brief missing' });
+          researchSpan?.end();
+          orchestratorSpan?.setStatus({ code: 2, message: 'Orchestration failed in Research phase' });
+          orchestratorSpan?.end();
+          
+          return { state };
+        }
+    } finally {
+        researchSpan?.end();
     }
 
-    this.notify({ type: 'message_added', role: 'system', content: 'Pesquisa concluída com sucesso.' });
-    this.notify({ type: 'phase_complete', phase: 'Research' });
+    notify({ type: 'message_added', role: 'system', content: 'Pesquisa concluída com sucesso.' });
+    notify({ type: 'phase_complete', phase: 'Research' });
     logger?.logEvent(state.id, 'phase_completed', { phase: 'Research' });
-    researchSpan?.end();
 
-    this.notify({ type: 'phase_start', phase: 'Planning' });
-    this.notify({ type: 'message_added', role: 'system', content: 'Iniciando planejamento da tarefa...' });
+    notify({ type: 'phase_start', phase: 'Planning' });
+    notify({ type: 'message_added', role: 'system', content: 'Iniciando planejamento da tarefa...' });
     logger?.logEvent(state.id, 'phase_started', { phase: 'Planning' });
 
     const planningSpan = tracing?.startPhaseSpan('Planning', orchestratorSpan);
-    const planningResult = await this.planningAgent.run(task, brief, undefined, planningSpan);
-    const postPlanningState = planningResult.state;
-    const plan = planningResult.plan;
+    let planningResult;
+    let plan: ExecutionPlan | null = null;
+    try {
+        planningResult = await this.planningAgent.run(task, brief, undefined, planningSpan);
+        state = planningResult.state;
+        plan = planningResult.plan;
 
-    this.totalUsage.totalTokens += postPlanningState.metadata.totalTokensUsed || 0;
-    this.notify({ type: 'usage_update', usage: this.totalUsage });
+        this.totalUsage.totalTokens += state.metadata.totalTokensUsed || 0;
+        this.notify({ type: 'usage_update', usage: this.totalUsage }, onProgress);
 
-    if (!plan) {
-      const error = postPlanningState.status === 'error' ? postPlanningState.metadata.errorMessage : 'Falha ao gerar ExecutionPlan.';
-      state = AgentStateMachine.fail(postPlanningState, error || 'Erro desconhecido no planejamento');
-      this.notify({ type: 'error', message: error || 'Erro desconhecido no planejamento' });
-      
-      planningSpan?.setStatus({ code: 2, message: error || 'Execution plan missing' });
-      planningSpan?.end();
-      orchestratorSpan?.setStatus({ code: 2, message: 'Orchestration failed in Planning phase' });
-      orchestratorSpan?.end();
-      
-      return { state };
+        if (!plan) {
+          const error = state.status === 'error' ? state.metadata.errorMessage : 'Falha ao gerar ExecutionPlan.';
+          state = AgentStateMachine.fail(state, error || 'Erro desconhecido no planejamento');
+          notify({ type: 'error', message: error || 'Erro desconhecido no planejamento' });
+          
+          planningSpan?.setStatus({ code: 2, message: error || 'Execution plan missing' });
+          planningSpan?.end();
+          orchestratorSpan?.setStatus({ code: 2, message: 'Orchestration failed in Planning phase' });
+          orchestratorSpan?.end();
+          
+          return { state };
+        }
+    } finally {
+        planningSpan?.end();
     }
 
-    this.notify({ type: 'message_added', role: 'system', content: 'Plano de execução gerado.' });
-    this.notify({ type: 'phase_complete', phase: 'Planning' });
+    notify({ type: 'message_added', role: 'system', content: 'Plano de execução gerado.' });
+    notify({ type: 'phase_complete', phase: 'Planning' });
     logger?.logEvent(state.id, 'phase_completed', { phase: 'Planning', risk: plan.estimatedRisk });
-    planningSpan?.end();
 
     // --- PONTO DE CONTROLE: APROVAÇÃO DO PLANO ---
     if (!this.autoApprove) {
-        this.notify({ type: 'message_added', role: 'system', content: 'Aguardando aprovação do plano de execução...' });
+        notify({ type: 'message_added', role: 'system', content: 'Aguardando aprovação do plano de execução...' });
         
         const approved = await this.liveConfig.humanApprovalCallback?.(
             { 
@@ -299,19 +352,19 @@ export class OrchestratorAgent {
         );
 
         if (!approved) {
-            state = AgentStateMachine.fail(postPlanningState, 'Execução cancelada pelo usuário após revisão do plano.');
-            this.notify({ type: 'error', message: 'Execução cancelada pelo usuário.' });
+            state = AgentStateMachine.fail(state, 'Execução cancelada pelo usuário após revisão do plano.');
+            notify({ type: 'error', message: 'Execução cancelada pelo usuário.' });
             orchestratorSpan?.setStatus({ code: 2, message: 'Plan rejected by user' });
             orchestratorSpan?.end();
             return { state, plan };
         }
     }
 
-    this.notify({ type: 'phase_start', phase: 'Execution' });
+    notify({ type: 'phase_start', phase: 'Execution' });
     logger?.logEvent(state.id, 'phase_started', { phase: 'Execution', streamCount: plan.streams.length });
     const executionSpan = tracing?.startPhaseSpan('Execution', orchestratorSpan);
 
-    const streamResults = await this.executePlanStreams(state, plan, brief, executionSpan);
+    const streamResults = await this.executePlanStreams(state, plan, brief!, executionSpan, onProgress);
 
     const firstError = streamResults.find(
       (result): result is { streamId: string; error: string } => typeof result.error === 'string'
@@ -327,10 +380,24 @@ export class OrchestratorAgent {
 
     executionSpan?.end();
     state = AgentStateMachine.complete(state, 'Orquestração finalizada com sucesso.');
-    this.notify({ type: 'message_added', role: 'system', content: '=== TAREFA FINALIZADA ===' });
-    this.notify({ type: 'phase_complete', phase: 'Finalized' });
+    
+    // Add a final assistant message for the client if no other assistant message was added recently
+    // or to serve as a proper final response in the state.
+    state = AgentStateMachine.addMessage(state, {
+        role: 'assistant',
+        content: 'Tarefa concluída com sucesso.',
+        timestamp: new Date().toISOString()
+    });
+
+    notify({ type: 'message_added', role: 'assistant', content: '=== TAREFA FINALIZADA ===' });
+    notify({ type: 'phase_complete', phase: 'Finalized' });
     logger?.logEvent(state.id, 'orchestrator_completed', { status: 'success' });
     
+    // Automação de Aprendizado: Registra a experiência bem-sucedida
+    this.experienceManager.addExperience(task, state.id).catch(err => {
+      console.error('[Orchestrator] Erro ao registrar experiência:', err);
+    });
+
     orchestratorSpan?.setStatus({ code: 1 });
     orchestratorSpan?.end();
     
@@ -341,7 +408,8 @@ export class OrchestratorAgent {
     state: AgentState,
     plan: ExecutionPlan,
     brief: ResearchBrief,
-    executionSpan?: ReturnType<NonNullable<ReActConfig['tracing']>['startPhaseSpan']>
+    executionSpan?: ReturnType<NonNullable<ReActConfig['tracing']>['startPhaseSpan']>,
+    onProgress?: OrchestratorUpdateCallback
   ): Promise<Array<{ streamId: string; error?: string }>> {
     const results: Array<{ streamId: string; error?: string }> = [];
     const completedStreams = new Set<string>();
@@ -370,12 +438,12 @@ export class OrchestratorAgent {
       }
 
       for (const stream of readyStreams) {
-        const result = await this.executeStream(state, plan, brief, stream, executionSpan);
+        const result = await this.executeStream(state, plan, brief, stream, executionSpan, onProgress);
 
         if (result.error) {
           // ── Feedback Loop: attempt recovery before propagating ──
           const recovered = await this.attemptFeedbackLoop(
-            state, plan, brief, stream, result.error, executionSpan
+            state, plan, brief, stream, result.error, executionSpan, onProgress
           );
 
           if (recovered) {
@@ -402,14 +470,16 @@ export class OrchestratorAgent {
     plan: ExecutionPlan,
     brief: ResearchBrief,
     stream: ExecutionStream,
-    executionSpan?: ReturnType<NonNullable<ReActConfig['tracing']>['startPhaseSpan']>
+    executionSpan?: ReturnType<NonNullable<ReActConfig['tracing']>['startPhaseSpan']>,
+    onProgress?: OrchestratorUpdateCallback
   ): Promise<{ streamId: string; error?: string }> {
+    const notify = (event: OrchestratorEvent) => this.notify(event, onProgress);
     const logger = this.config.logger;
     const tracing = this.config.tracing;
     const streamSpan = tracing?.startPhaseSpan(`Stream: ${stream.name}`, executionSpan);
     const specializedPrompt = this.getSpecializedPrompt(stream.owner);
 
-    this.notify({ type: 'message_added', role: 'system', content: `Executando: ${stream.name}` });
+    notify({ type: 'message_added', role: 'system', content: `Executando: ${stream.name}` });
     logger?.logEvent(state.id, 'stream_started', { streamId: stream.id, streamName: stream.name });
     stream.status = 'in_progress';
 
@@ -419,6 +489,19 @@ export class OrchestratorAgent {
       const workerRegistry = createDevelopmentToolRegistry({ workspaceRoot: workspaceDir });
       const workerAgent = new ReActAgent({
         ...this.liveConfig,
+        onUpdate: (event) => {
+            if (event.type === 'message_added') {
+                notify({ 
+                    type: 'message_added', 
+                    role: event.role!, 
+                    content: event.content!,
+                    usage: event.usage,
+                    latencyMs: event.latencyMs,
+                    contextWindow: event.contextWindow,
+                    reasoningTokens: event.reasoningTokens
+                });
+            }
+        },
         registry: workerRegistry,
         llmConfig: {
           ...this.config.llmConfig,
@@ -436,7 +519,7 @@ export class OrchestratorAgent {
         streamSpan
       );
       this.totalUsage.totalTokens += workerState.metadata.totalTokensUsed || 0;
-      this.notify({ type: 'usage_update', usage: this.totalUsage });
+      notify({ type: 'usage_update', usage: this.totalUsage });
 
       if (workerState.status === 'completed') {
         if (workspaceDir !== this.workspaceRoot) {
@@ -445,7 +528,7 @@ export class OrchestratorAgent {
 
         stream.status = 'completed';
         const summary = this.extractWorkerSummary(workerState);
-        this.notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${summary}` });
+        notify({ type: 'message_added', role: 'assistant', content: `RESUMO FINAL: ${summary}` });
         logger?.logEvent(state.id, 'stream_completed', { streamId: stream.id, status: 'completed' });
         streamSpan?.end();
         return { streamId: stream.id };
@@ -457,7 +540,7 @@ export class OrchestratorAgent {
 
       stream.status = 'failed';
       const errorMessage = workerState.metadata.errorMessage ?? 'Falha desconhecida na execucao do stream.';
-      this.notify({ type: 'error', message: `Falha na execucao: ${errorMessage}` });
+      notify({ type: 'error', message: `Falha na execucao: ${errorMessage}` });
       logger?.logEvent(state.id, 'stream_failed', { streamId: stream.id, error: errorMessage });
       streamSpan?.setStatus({ code: 2, message: errorMessage });
       streamSpan?.end();
@@ -473,7 +556,7 @@ export class OrchestratorAgent {
 
       stream.status = 'failed';
       const message = error instanceof Error ? error.message : String(error);
-      this.notify({ type: 'error', message: `Erro de infraestrutura no stream ${stream.id}: ${message}` });
+      notify({ type: 'error', message: `Erro de infraestrutura no stream ${stream.id}: ${message}` });
       streamSpan?.setStatus({ code: 2, message });
       streamSpan?.end();
       return { streamId: stream.id, error: message };
@@ -491,13 +574,15 @@ export class OrchestratorAgent {
     brief: ResearchBrief,
     originalStream: ExecutionStream,
     error: string,
-    executionSpan?: ReturnType<NonNullable<ReActConfig['tracing']>['startPhaseSpan']>
+    executionSpan?: ReturnType<NonNullable<ReActConfig['tracing']>['startPhaseSpan']>,
+    onProgress?: OrchestratorUpdateCallback
   ): Promise<boolean> {
+    const notify = (event: OrchestratorEvent) => this.notify(event, onProgress);
     const logger = this.config.logger;
     const tracing = this.config.tracing;
     const failureKind = this.feedbackLoop.classifyFromError(error);
 
-    this.notify({
+    notify({
       type: 'message_added',
       role: 'system',
       content: `Feedback Loop: falha classificada como '${failureKind}' no stream "${originalStream.name}". Tentando recuperação automática...`,
@@ -515,7 +600,7 @@ export class OrchestratorAgent {
         executionSpan
       );
 
-      this.notify({
+      notify({
         type: 'message_added',
         role: 'system',
         content: `Feedback Loop iteração ${iteration}/${this.feedbackLoop.getPolicy().maxRetries}: delegando para ${promptRole}...`,
@@ -535,7 +620,8 @@ export class OrchestratorAgent {
         plan,
         brief,
         { ...recoveryStream, owner: recoveryStream.owner },
-        feedbackSpan
+        feedbackSpan,
+        onProgress
       );
 
       const feedbackRecord: FeedbackIteration = {
@@ -564,7 +650,7 @@ export class OrchestratorAgent {
       feedbackSpan?.end();
 
       if (!recoveryResult.error) {
-        this.notify({
+        notify({
           type: 'message_added',
           role: 'system',
           content: `Feedback Loop: recuperação bem-sucedida na iteração ${iteration}.`,
@@ -587,7 +673,7 @@ export class OrchestratorAgent {
       ? `Feedback Loop encerrado: orçamento de tokens excedido (${this.totalUsage.totalTokens} >= ${this.feedbackLoop.getPolicy().maxCostTokens}).`
       : `Feedback Loop encerrado: máximo de ${iterationCount} tentativas atingido para stream "${originalStream.name}".`;
 
-    this.notify({ type: 'error', message: reason });
+    notify({ type: 'error', message: reason });
     logger?.logEvent(state.id, 'feedback_loop_exhausted', {
       streamId: originalStream.id,
       iterations: iterationCount,

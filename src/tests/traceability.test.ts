@@ -52,7 +52,8 @@ test('Orchestrator Traceability', async () => {
         contextManager: new ContextManager(),
         tracing,
         logger,
-    });
+        autoApprove: true,
+    } as any);
 
     await orchestrator.run('Test task');
 
