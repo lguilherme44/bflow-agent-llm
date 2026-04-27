@@ -1,5 +1,56 @@
 # TODO - Fase 1: Core do Agente
 
+## ✅ 2026-04-26 — Sprint beahub: Fase 3 — Testes + Eval + Skills + CLI
+
+### 1 — Testes de qualidade + benchmark
+- [x] `quality-benchmark.test.ts`: RAG hit rate (10 queries, 60%+ min), context compression preservation, budget enforcement, regression gate, latency budget (50ms), snapshot capture/restore
+
+### 2 — Budget enforcement completo
+- [x] ResearchAgent com budget (20 calls / 50k tokens / $0.25)
+- [x] PlanningAgent com budget (15 calls / 30k tokens / $0.15)
+- [x] Worker agents no Orchestrator com budget por role
+
+### 3 — Eval harness
+- [x] `src/eval/harness.ts`: EvalRunner com smoke suite (4 casos) e full suite (8 casos)
+- [x] Métricas: pass rate, avg tokens, avg cost, avg duration, erros, human approvals
+- [x] Report JSON salvo em `.agent/eval/`
+
+### 4 — skills.md completo
+- [x] Stack SaaS (React, Mantine, TanStack Query, Socket.io, RBAC)
+- [x] Tool budgets por agente, fluxo completo, estrutura de diretórios
+- [x] API do SaaS (clientes, agendamentos, serviços, barbeiros)
+- [x] Troubleshooting com problemas comuns
+
+### 5 — Visual CLI com progresso
+- [x] Spinner animado com fase atual e contagem de tokens
+- [x] Callback `onUpdate` no REPL com progresso em tempo real
+
+---
+
+## ✅ 2026-04-26 — Sprint beahub: Fase 2 — Tool Budget + MCP + Git + Snapshot + Docker
+
+### A — Tool Budget + Rate Limit
+- [x] `ToolBudget` type com maxToolCalls, maxTokens, maxCostUsd
+- [x] `DEFAULT_TOOL_BUDGETS` por role
+- [x] Enforcement no ReActAgent loop
+- [x] Rate limiting no LLMRouter (max 3 concorrentes)
+
+### B — MCP Server do SaaS
+- [x] `mcp-server/index.ts` com 7 tools: clients, appointments, services, barbers, stats
+
+### C — DocsAgent + Git Integration
+- [x] Branch `agent/task-<id>` automática antes da execução
+- [x] Merge `--no-ff` em main ao finalizar
+
+### D — Snapshot + Package Lock
+- [x] `SnapshotService`: captura/restore de arquivos, persistência em disco
+- [x] `validatePackageLock()`: valida integridade
+
+### E — Sandbox Docker
+- [x] DockerSandboxExecutor + NativeSandboxExecutor + factory createSandbox()
+
+---
+
 ## ✅ 2026-04-26 — Sprint beahub: Dashboard + RAG + Context Compression
 
 **Branch:** `develop` | **Commits:** 4
@@ -1140,3 +1191,44 @@ Objetivo: transformar o agente em uma ferramenta de linha de comando de primeira
 - [ ] Auditoria Local: gerar um arquivo `.agent/audit.log` com hash de cada comando e arquivo alterado.
 
 Pronto quando: usar o agente é tão natural quanto usar o `git` ou o `npm`, com uma interface visual que passa confiança e controle total ao desenvolvedor.
+
+---
+
+## 🔮 Benchmark: ideias do ecossistema (Claude Code + Codex)
+
+Baseado em `anthropics/claude-code` (118k ⭐) e `openai/codex` (78k ⭐):
+
+### GAPS (o que eles têm e nós não)
+
+| # | Feature | Fonte | Status |
+|---|---------|-------|--------|
+| 6 | Code review com 5 agentes paralelos + confidence scoring | Claude Code `code-review` | ❌ |
+| 7 | PreToolUse security hooks (XSS, SQLi, eval, pickle, os.system) | Claude Code `security-guidance` | ⚠️ |
+| 8 | Plugin system (hooks + commands + agents + skills + MCP + marketplace) | Claude Code `plugin-dev` | ⚠️ |
+| 9 | Feature dev 7-phase workflow guiado | Claude Code `feature-dev` | ⚠️ |
+| 10 | Granular review agents (breaking changes, silent failures, type design) | Claude Code `pr-review-toolkit` | ❌ |
+| 11 | Autonomous iteration loops (Ralph Wiggum — repete até funcionar) | Claude Code `ralph-wiggum` | ⚠️ |
+| 12 | Frontend design guidance (evitar AI aesthetic genérico) | Claude Code `frontend-design` | ❌ |
+| 13 | Babysit PR (monitora + auto-fixa) | Codex `babysit-pr` | ❌ |
+| 14 | Remote test execution | Codex `remote-tests` | ❌ |
+| 15 | Issue digest / PR body generation | Codex `codex-issue-digest` | ❌ |
+
+### DIFERENCIAIS (o que só nós temos)
+
+- ✅ RAG local com LanceDB (zero infra, offline-first)
+- ✅ GPU 8GB optimized (tool budgets, compressão Polar Code)
+- ✅ Dashboard visual (React + Recharts + WebSocket em tempo real)
+- ✅ Checkpoint persistente granular
+- ✅ AST-first editing completo (Tree-sitter + ast-grep + TS LS)
+- ✅ Ollama local first-class (auto-detect + fallback TF-IDF)
+- ✅ MCP Server próprio do SaaS (7 tools)
+
+### PRÓXIMAS FEATURES SUGERIDAS
+
+| # | Feature | Impacto | Esforço |
+|---|---------|---------|---------|
+| 6 | Code review avançado — 4 agentes paralelos + confidence scoring | ⭐⭐⭐ | Médio |
+| 7 | Security hooks web — XSS, SQL injection, eval no PreToolUse | ⭐⭐⭐ | Baixo |
+| 8 | Plugin system — /plugin install, hooks customizáveis | ⭐⭐⭐ | Grande |
+| 9 | Ralph Loop — iteração autônoma persistente até task passar | ⭐⭐ | Baixo |
+| 10 | Babysit PR — monitora PR, roda testes, auto-fixa | ⭐⭐ | Médio |
