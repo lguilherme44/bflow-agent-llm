@@ -199,7 +199,45 @@ export async function runRepl(
     console.log(picocolors.dim(`\n--- ${new Date().toLocaleTimeString()} ---`));
     
     try {
-      const result = await currentOrchestrator.run(input);
+      let currentPhase = '';
+      let lastUsage = { totalTokens: 0 };
+      let spinnerIdx = 0;
+      const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+      
+      const progressInterval = setInterval(() => {
+        if (currentPhase) {
+          const frame = spinnerFrames[spinnerIdx % spinnerFrames.length];
+          process.stdout.write(`\r  ${picocolors.cyan(frame)} ${picocolors.bold(currentPhase)} ${picocolors.dim(`| ${lastUsage.totalTokens.toLocaleString()} tokens`)}   `);
+          spinnerIdx++;
+        }
+      }, 120);
+
+      const result = await currentOrchestrator.run(input, undefined, (event) => {
+        if (event.type === 'phase_start') {
+          currentPhase = event.phase;
+          if (event.phase === 'Chat' || event.phase === 'Resposta Direta') {
+            clearInterval(progressInterval);
+          }
+        } else if (event.type === 'phase_complete') {
+          currentPhase = '';
+        } else if (event.type === 'usage_update') {
+          lastUsage = event.usage;
+        } else if (event.type === 'message_added' && event.role === 'assistant') {
+          clearInterval(progressInterval);
+          process.stdout.write('\r' + ' '.repeat(60) + '\r'); // Clear spinner line
+          console.log(picocolors.green(`\n🤖 ${event.content.slice(0, 500)}${event.content.length > 500 ? '...' : ''}`));
+          
+          if (event.usage) {
+            console.log(picocolors.dim(`   📊 ${event.usage.totalTokens.toLocaleString()} tokens | ${event.latencyMs || 0}ms`));
+          }
+        } else if (event.type === 'error') {
+          process.stdout.write('\r' + ' '.repeat(60) + '\r');
+          console.error(picocolors.red(`\n❌ ${event.message}`));
+        }
+      });
+      
+      clearInterval(progressInterval);
+      process.stdout.write('\r' + ' '.repeat(60) + '\r'); // Clear spinner line
       
       if (result.state.status === 'completed') {
         // O resumo final já é notificado pelo orchestrator via callback se estiver configurado,

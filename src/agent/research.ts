@@ -1,6 +1,6 @@
 import { Span } from '@opentelemetry/api';
 import { ReActAgent, ReActConfig } from './react-loop.js';
-import { AgentState, ResearchBrief } from '../types/index.js';
+import { AgentState, ResearchBrief, DEFAULT_TOOL_BUDGETS } from '../types/index.js';
 import { LLMResponseParser } from '../llm/adapter.js';
 import { createTool } from '../tools/schema.js';
 import { ToolRegistry } from '../tools/registry.js';
@@ -67,6 +67,7 @@ export class ResearchAgent {
 
     this.reactAgent = new ReActAgent({
       ...config,
+      toolBudget: DEFAULT_TOOL_BUDGETS.researcher,
       registry: researchRegistry,
       llmConfig: {
         ...config.llmConfig,
