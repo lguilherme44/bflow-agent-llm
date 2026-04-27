@@ -1,5 +1,43 @@
 # TODO - Fase 1: Core do Agente
 
+## ✅ 2026-04-26 — Sprint beahub: Dashboard + RAG + Context Compression
+
+**Branch:** `develop` | **Commits:** 4
+
+### P1 — Dashboard com token breakdown, custo, erro/sucesso
+- [x] `SessionMetadata` estendido: promptTokens, completionTokens, estimatedCostUsd, avgLatencyMs, providerBreakdown, toolCallCount, toolErrorCount
+- [x] Nova API `GET /api/sessions/:id/breakdown` com quebra por provider, tool calls, timeline
+- [x] `DashboardService` calcula custo por provider (precificação por 1M tokens)
+- [x] Overview: cards de custo, latência, tokens/sessão + gráfico pizza provider + prompt vs completion
+- [x] SessionDetail: painel resumo (tokens/custo/latência/tools) + tabela provider + tabela tool calls com taxa de sucesso + badges na timeline
+- [x] SessionList: colunas prompt, completion, custo, latência, tools + filtros por status e busca
+- [x] Fix: `export-dataset.ts` (unused var), `experience-manager.ts` (type cast)
+
+### P2 — RAG integrado ao Orchestrator com threshold e reranking
+- [x] `OrchestratorAgent` pré-carrega RAG antes da fase Research (indexa workspace + injeta contexto)
+- [x] `retrieveHybrid` suporta `minScore` (threshold de relevância configurável)
+- [x] `rerankWithLLM()` — re-ranking semântico via LLM leve
+- [x] `getContextForPrompts()` — contexto compacto deduplicado (max 3000 tokens)
+- [x] `LocalRagService.setRerankLLM()` — injeção de modelo para rerank
+- [x] `server.ts` cria e injeta `LocalRagService` no Orchestrator
+
+### P3 — Compressão de contexto inteligente (Polar Code style)
+- [x] `smartTruncate` — corta em boundaries de parágrafo/frase em vez de char limit cego
+- [x] `smartCompact` — scoring de importância (erros > decisões > tool calls > recência)
+- [x] `buildCompactSummary` — resumo rico: tarefa, decisões, restrições, progresso, erros, arquivos, próximas ações
+- [x] `deduplicateToolResults` — remove tool results repetidos
+- [x] `messageImportance` scoring: erros (40), tool calls (25), decisões (20), retries (15), recência (30)
+
+### P4 — Ollama embeddings como default
+- [x] `resolveDefaultProvider` detecta Ollama automaticamente (modo `auto`)
+- [x] Fallback silencioso para TF-IDF quando Ollama indisponível
+
+### P5 — Filtros avançados no dashboard
+- [x] SessionList: filtro por status (todos/concluídos/erro/em andamento)
+- [x] Campo de busca por tarefa ou ID com contador de resultados
+
+---
+
 Objetivo: finalizar o cerebro do agente com estado retomavel, loop ReAct, tools robustas e gerenciamento de contexto.
 
 Status inicial observado em 2026-04-22:
@@ -274,8 +312,8 @@ Principios de arquitetura:
 - [x] Tools pequenas, composaveis e auditaveis.
 - [x] HITL para decisoes destrutivas, caras, ambiguas ou sensiveis.
 - [x] Validar antes de aceitar: typecheck, lint, testes e security scan.
-- [ ] Parcial: Observabilidade desde o inicio: todo custo, comando, arquivo e decisao deve ser rastreavel.
-- [ ] Parcial: Contexto sob controle: RAG + compactacao, nunca "jogar tudo na janela".
+- [x] Observabilidade: todo custo, comando, arquivo e decisao rastreado via dashboard (P1).
+- [x] Contexto sob controle: RAG pré-carregado + compressão inteligente com scoring de importância (P2+P3).
 - [ ] Parcial: Privilegios minimos: cada agente/tool recebe apenas o acesso necessario.
 - [ ] Avaliacao continua: medir taxa de sucesso, regressao, custo e correcao humana.
 
