@@ -1,4 +1,5 @@
-import { ChevronRight, Trash2, DollarSign, Terminal } from 'lucide-react';
+import { useState, useMemo } from 'react';
+import { ChevronRight, Trash2, DollarSign, Terminal, Filter, X } from 'lucide-react';
 import { StatusBadge } from './StatusBadge';
 
 interface SessionMetadata {
@@ -25,11 +26,83 @@ const formatUsd = (value: number) => value > 0.0001 ? `$${value.toFixed(4)}` : '
 const formatMs = (ms: number) => ms > 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 
 export function SessionList({ sessions, onSelect, onDelete }: SessionListProps) {
+  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [searchFilter, setSearchFilter] = useState('');
+
+  const filtered = useMemo(() => {
+    return sessions.filter(s => {
+      if (statusFilter !== 'all' && s.status !== statusFilter) return false;
+      if (searchFilter && !s.task.toLowerCase().includes(searchFilter.toLowerCase()) && !s.id.includes(searchFilter)) return false;
+      return true;
+    });
+  }, [sessions, statusFilter, searchFilter]);
+
   return (
     <div className="card animate-fade-in">
       <div className="card-header">
         <h2 className="card-title">Histórico de Sessões</h2>
-        <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>{sessions.length} sessões encontradas</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          {/* Status filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Filter size={14} color="var(--text-secondary)" />
+            <select
+              value={statusFilter}
+              onChange={e => setStatusFilter(e.target.value)}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.05)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                color: 'var(--text-primary)',
+                padding: '4px 8px',
+                fontSize: '0.8125rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="all">Todos</option>
+              <option value="completed">Concluídos</option>
+              <option value="error">Com erro</option>
+              <option value="in_progress">Em andamento</option>
+            </select>
+          </div>
+          {/* Search */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', position: 'relative' }}>
+            <input
+              type="text"
+              placeholder="Buscar por tarefa ou ID..."
+              value={searchFilter}
+              onChange={e => setSearchFilter(e.target.value)}
+              style={{
+                backgroundColor: 'rgba(255,255,255,0.05)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '6px',
+                color: 'var(--text-primary)',
+                padding: '4px 28px 4px 10px',
+                fontSize: '0.8125rem',
+                width: '200px',
+                outline: 'none',
+              }}
+            />
+            {searchFilter && (
+              <button
+                onClick={() => setSearchFilter('')}
+                style={{
+                  position: 'absolute',
+                  right: '6px',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '2px',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <div style={{ fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+            {filtered.length}/{sessions.length} sessões
+          </div>
+        </div>
       </div>
       <div className="table-container">
         <table>
@@ -49,7 +122,7 @@ export function SessionList({ sessions, onSelect, onDelete }: SessionListProps) 
             </tr>
           </thead>
           <tbody>
-            {sessions.map(s => (
+            {filtered.map(s => (
               <tr key={s.id} onClick={() => onSelect(s.id)} style={{ cursor: 'pointer' }}>
                 <td>
                   <StatusBadge status={s.status} />
@@ -154,6 +227,15 @@ export function SessionList({ sessions, onSelect, onDelete }: SessionListProps) 
                 </td>
               </tr>
             ))}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={11} style={{ textAlign: 'center', padding: '40px', color: 'var(--text-secondary)' }}>
+                  {sessions.length === 0 
+                    ? 'Nenhuma sessão registrada.' 
+                    : 'Nenhuma sessão corresponde aos filtros.'}
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

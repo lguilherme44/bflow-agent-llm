@@ -72,7 +72,7 @@
 
 ## Phase 4: Ollama Embeddings como Default [P4]
 
-**Status:** `pending`
+**Status:** `in_progress`
 
 ### 4.1 Trocar TF-IDF por Ollama
 - [ ] Fazer OllamaEmbeddingProvider o default quando Ollama disponível

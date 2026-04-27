@@ -56,22 +56,20 @@ export class LocalRagService {
   }
 
   private resolveDefaultProvider(): EmbeddingProvider {
-    const type = process.env.EMBEDDING_PROVIDER || 'tf-idf';
+    const type = process.env.EMBEDDING_PROVIDER || 'auto';
 
-    if (type === 'ollama') {
-      const model = process.env.OLLAMA_EMBED_MODEL;
-      const baseUrl = process.env.OLLAMA_BASE_URL;
-      const dimensions = Number.parseInt(process.env.OLLAMA_EMBED_DIMENSIONS || '1024');
+    // Detect Ollama if available
+    if (type === 'ollama' || type === 'auto') {
+      const model = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
+      const baseUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+      const dimensions = Number.parseInt(process.env.EMBEDDING_DIMENSIONS || '768', 10);
 
-      if (!model || !baseUrl) {
-        throw new Error('OLLAMA_EMBED_MODEL and OLLAMA_BASE_URL must be set when EMBEDDING_PROVIDER is "ollama"');
+      // Try Ollama — if it fails, fall back to TF-IDF
+      try {
+        return new OllamaEmbeddingProvider(dimensions, model, baseUrl);
+      } catch {
+        // Ollama unavailable — use TF-IDF silently
       }
-
-      return new OllamaEmbeddingProvider(
-        dimensions,
-        model,
-        baseUrl
-      );
     }
 
     return new TfIdfEmbeddingProvider();
