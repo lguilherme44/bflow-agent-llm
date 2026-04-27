@@ -14,6 +14,8 @@ import { redactMessages } from './redaction.js';
 
 export class LLMRouter {
   private readonly providers = new Map<string, LLMProvider>();
+  private activeCalls = 0;
+  private readonly queue: Array<() => void> = [];
 
   constructor(
     providers: LLMProvider[],
@@ -22,6 +24,29 @@ export class LLMRouter {
     for (const provider of providers) {
       this.providers.set(provider.name, provider);
     }
+  }
+
+  private async acquireSlot(): Promise<void> {
+    const maxConcurrent = this.policy.maxConcurrentCalls ?? 3;
+    
+    if (this.activeCalls < maxConcurrent) {
+      this.activeCalls++;
+      return;
+    }
+
+    // Queue up
+    return new Promise(resolve => {
+      this.queue.push(() => {
+        this.activeCalls++;
+        resolve();
+      });
+    });
+  }
+
+  private releaseSlot(): void {
+    this.activeCalls--;
+    const next = this.queue.shift();
+    if (next) next();
   }
 
   async complete(input: {
@@ -39,6 +64,9 @@ export class LLMRouter {
       const timeout = setTimeout(() => controller.abort(), this.policy.timeoutMs);
 
       try {
+        // Rate limit: wait for a concurrency slot
+        await this.acquireSlot();
+
         const model = input.config?.model ?? this.policy.taskModelPreferences[taskKind] ?? provider.defaultModel;
         const request: LLMProviderRequest = {
           messages: redactMessages(input.messages),
@@ -48,6 +76,7 @@ export class LLMRouter {
           signal: controller.signal,
         };
         const response = await provider.complete(request);
+        this.releaseSlot();
 
         if (
           this.policy.maxEstimatedCostUsd !== undefined &&
@@ -60,6 +89,7 @@ export class LLMRouter {
 
         return response;
       } catch (error) {
+        this.releaseSlot();
         const message = error instanceof Error ? error.message : String(error);
         errors.push(`${provider.name}: ${message}`);
       } finally {

@@ -304,7 +304,32 @@ export interface LLMRouterPolicy {
   taskModelPreferences: Partial<Record<LLMTaskKind, string>>;
   maxEstimatedCostUsd?: number;
   timeoutMs: number;
+  /** Maximum concurrent LLM calls (rate limit for parallel sub-agents). Default: 3 */
+  maxConcurrentCalls?: number;
 }
+
+// ── Tool Budget ───────────────────────────────────────────────
+
+export interface ToolBudget {
+  /** Maximum number of tool calls allowed. Default: 50 */
+  maxToolCalls: number;
+  /** Maximum total tokens (prompt + completion) allowed. Default: 100k */
+  maxTokens: number;
+  /** Maximum estimated cost in USD. Default: 0.50 */
+  maxCostUsd: number;
+}
+
+export const DEFAULT_TOOL_BUDGETS: Record<string, ToolBudget> = {
+  researcher: { maxToolCalls: 20, maxTokens: 50_000, maxCostUsd: 0.25 },
+  planner:    { maxToolCalls: 15, maxTokens: 30_000, maxCostUsd: 0.15 },
+  coder:      { maxToolCalls: 50, maxTokens: 100_000, maxCostUsd: 0.50 },
+  reviewer:   { maxToolCalls: 20, maxTokens: 40_000, maxCostUsd: 0.20 },
+  tester:     { maxToolCalls: 30, maxTokens: 60_000, maxCostUsd: 0.30 },
+  debug:      { maxToolCalls: 25, maxTokens: 50_000, maxCostUsd: 0.25 },
+  docs:       { maxToolCalls: 15, maxTokens: 25_000, maxCostUsd: 0.10 },
+  orchestrator: { maxToolCalls: 10, maxTokens: 20_000, maxCostUsd: 0.10 },
+  default:    { maxToolCalls: 50, maxTokens: 100_000, maxCostUsd: 0.50 },
+};
 
 export type ToolFunction = (
   args: Record<string, JsonValue>,

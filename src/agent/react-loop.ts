@@ -6,6 +6,7 @@ import {
   LLMConfig,
   LLMResponse,
   PersonaStyle,
+  ToolBudget,
   ToolCall,
   ToolResult,
 } from '../types/index.js';
@@ -47,6 +48,8 @@ export interface ReActConfig {
   hookService?: HookService;
   personaStyle?: PersonaStyle;
   sandboxMode?: SandboxMode;
+  /** Budget limits for this agent (tool calls, tokens, cost). Defaults to 'default' preset. */
+  toolBudget?: Partial<ToolBudget>;
 }
 
 export interface VerificationResult {
@@ -56,8 +59,15 @@ export interface VerificationResult {
 
 export class ReActAgent {
   private readonly executor: ToolExecutor;
+  private readonly budget: ToolBudget;
+  private budgetUsed = { calls: 0, tokens: 0, costUsd: 0 };
 
   constructor(private readonly config: ReActConfig) {
+    this.budget = {
+      maxToolCalls: config.toolBudget?.maxToolCalls ?? 50,
+      maxTokens: config.toolBudget?.maxTokens ?? 100_000,
+      maxCostUsd: config.toolBudget?.maxCostUsd ?? 0.50,
+    };
     this.executor = new ToolExecutor(
       config.registry,
       config.executorConfig,
@@ -186,6 +196,17 @@ export class ReActAgent {
 
     try {
       while (!this.isTerminal(state.status)) {
+        // ── Budget Enforcement ──
+        const budgetExceeded = this.checkBudget();
+        if (budgetExceeded) {
+          state = AgentStateMachine.fail(state, budgetExceeded);
+          this.config.logger?.logEvent(state.id, 'budget_exceeded', {
+            reason: budgetExceeded,
+            used: { ...this.budgetUsed },
+            limit: { ...this.budget },
+          });
+          break;
+        }
         if (state.status === 'awaiting_human') {
           state = await this.handlePendingHumanApproval(state);
           await this.config.checkpointManager.checkpoint(state);
@@ -382,6 +403,11 @@ export class ReActAgent {
     }
 
     let next = AgentStateMachine.addTokenUsage(thinkingState, llmResponse.usage.totalTokens);
+    
+    // Track budget usage
+    this.budgetUsed.tokens += llmResponse.usage.totalTokens;
+    this.budgetUsed.costUsd += 0; // Cost tracked separately per provider
+    
     next = AgentStateMachine.addMessage(next, {
       role: 'assistant',
       content: llmResponse.content,
@@ -433,6 +459,9 @@ export class ReActAgent {
       }
 
       const result = await this.executor.execute(next, toolCall);
+      
+      // Track tool call in budget
+      this.budgetUsed.calls++;
       this.config.logger?.logToolExecution(next.id, toolCall.toolName, toolCall.id, result);
       next = this.recordToolResult(next, toolCall, result);
     }
@@ -732,6 +761,20 @@ export class ReActAgent {
 
   private isTerminal(status: AgentStatus): boolean {
     return status === 'completed' || status === 'error';
+  }
+
+  /** Check if budget is exceeded. Returns error message string if exceeded, null otherwise. */
+  private checkBudget(): string | null {
+    if (this.budgetUsed.calls >= this.budget.maxToolCalls) {
+      return `Tool call budget exceeded: ${this.budgetUsed.calls}/${this.budget.maxToolCalls} calls used`;
+    }
+    if (this.budgetUsed.tokens >= this.budget.maxTokens) {
+      return `Token budget exceeded: ${this.budgetUsed.tokens.toLocaleString()}/${this.budget.maxTokens.toLocaleString()} tokens used`;
+    }
+    if (this.budgetUsed.costUsd > this.budget.maxCostUsd) {
+      return `Cost budget exceeded: ${this.budgetUsed.costUsd.toFixed(4)}/${this.budget.maxCostUsd.toFixed(2)}`;
+    }
+    return null;
   }
 }
 

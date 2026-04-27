@@ -1,6 +1,7 @@
 import { ReActAgent, ReActConfig } from './react-loop.js';
 import path from 'path';
-import { AgentState, ExecutionPlan, ExecutionStream, FeedbackIteration, FeedbackLoopPolicy, ResearchBrief } from '../types/index.js';
+import { execSync } from 'node:child_process';
+import { AgentState, ExecutionPlan, ExecutionStream, FeedbackIteration, FeedbackLoopPolicy, ResearchBrief, DEFAULT_TOOL_BUDGETS, ToolBudget } from '../types/index.js';
 import { ResearchAgent } from './research.js';
 import { PlanningAgent } from './planning.js';
 import { FeedbackLoopEngine } from './feedback-loop.js';
@@ -386,6 +387,18 @@ export class OrchestratorAgent {
     logger?.logEvent(state.id, 'phase_started', { phase: 'Execution', streamCount: plan.streams.length });
     const executionSpan = tracing?.startPhaseSpan('Execution', orchestratorSpan);
 
+    // Git: create feature branch
+    const featureBranch = `agent/task-${state.id.slice(0, 8)}`;
+    let gitBranchCreated = false;
+    try {
+      execSync(`git checkout -b ${featureBranch}`, { cwd: this.workspaceRoot, stdio: 'pipe' });
+      gitBranchCreated = true;
+      notify({ type: 'message_added', role: 'system', content: `Branch criada: ${featureBranch}` });
+      logger?.logEvent(state.id, 'git_branch_created', { branch: featureBranch });
+    } catch {
+      // Not a git repo or git failed — continue without branching
+    }
+
     const streamResults = await this.executePlanStreams(state, plan, brief!, executionSpan, onProgress);
 
     const firstError = streamResults.find(
@@ -414,6 +427,18 @@ export class OrchestratorAgent {
     notify({ type: 'message_added', role: 'assistant', content: '=== TAREFA FINALIZADA ===' });
     notify({ type: 'phase_complete', phase: 'Finalized' });
     logger?.logEvent(state.id, 'orchestrator_completed', { status: 'success' });
+    
+    // Git: merge feature branch back (or commit directly if on feature branch)
+    if (gitBranchCreated) {
+      try {
+        execSync('git add -A && git commit -m "feat(agent): ' + task.slice(0, 40).replace(/"/g, '\\"') + '" || true', { cwd: this.workspaceRoot, stdio: 'pipe' });
+        execSync('git checkout main && git merge --no-ff ' + featureBranch + ' -m "merge: ' + featureBranch + '" || true', { cwd: this.workspaceRoot, stdio: 'pipe' });
+        notify({ type: 'message_added', role: 'system', content: `Branch ${featureBranch} merged em main.` });
+        logger?.logEvent(state.id, 'git_branch_merged', { branch: featureBranch });
+      } catch {
+        // Merge failed — leave branch as-is
+      }
+    }
     
     // Automação de Aprendizado: Registra a experiência bem-sucedida
     this.experienceManager.addExperience(task, state.id).catch(err => {
@@ -511,6 +536,7 @@ export class OrchestratorAgent {
       const workerRegistry = createDevelopmentToolRegistry({ workspaceRoot: workspaceDir });
       const workerAgent = new ReActAgent({
         ...this.liveConfig,
+        toolBudget: this.getBudgetForRole(stream.owner),
         onUpdate: (event) => {
             if (event.type === 'message_added') {
                 notify({ 
@@ -751,7 +777,12 @@ export class OrchestratorAgent {
       case 'tester':
       case 'test': return TESTER_PROMPT;
       case 'debug': return DEBUG_PROMPT;
+      case 'docs': return 'Você é um agente de documentação. Atualize README, CHANGELOG e ADRs.';
       default: return `Você é um agente especializado em ${role}.`;
     }
+  }
+
+  private getBudgetForRole(role: string): Partial<ToolBudget> {
+    return DEFAULT_TOOL_BUDGETS[role.toLowerCase()] ?? DEFAULT_TOOL_BUDGETS.default;
   }
 }
