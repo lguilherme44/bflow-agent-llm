@@ -28,10 +28,6 @@ async function exportDataset() {
       
       // Relaxed criteria: we export if it has assistant content, even if not explicitly "completed" yet
       const hasAssistantContent = lines.some(l => l.type === 'event' && l.payload.event === 'llm_content_debug');
-      const hasSuccess = lines.some(l => 
-        l.type === 'event' && ['orchestrator_completed', 'task_completed', 'phase_completed'].includes(l.payload.event)
-      );
-
       if (!hasAssistantContent) continue;
 
       let task = lines.find(l => l.type === 'event' && l.payload.event === 'orchestrator_started')?.payload.task;

@@ -82,6 +82,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (url.match(/^\/api\/sessions\/[^/]+\/breakdown$/) && req.method === 'GET') {
+    const agentId = url.split('/')[3];
+    if (agentId) {
+      const breakdown = await dashboard.getSessionBreakdown(agentId);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(breakdown));
+      return;
+    }
+  }
+
   if (url.startsWith('/api/sessions/') && req.method === 'GET') {
     const agentId = url.split('/').pop();
     if (agentId) {

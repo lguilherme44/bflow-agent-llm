@@ -6,13 +6,30 @@ import { SessionDetail } from './components/SessionDetail';
 import { Traces } from './components/Traces';
 
 // Types
-interface SessionMetadata {
+export interface ProviderBreakdown {
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  estimatedCostUsd: number;
+  calls: number;
+}
+
+export interface SessionMetadata {
   id: string;
   startTime: string;
   lastUpdateTime: string;
   task: string;
   status: 'completed' | 'error' | 'in_progress';
   tokenUsage: number;
+  promptTokens: number;
+  completionTokens: number;
+  estimatedCostUsd: number;
+  avgLatencyMs: number;
+  providerBreakdown: ProviderBreakdown[];
+  toolCallCount: number;
+  toolErrorCount: number;
   success: boolean;
 }
 
@@ -23,11 +40,40 @@ interface LogEntry {
   payload: any;
 }
 
+export interface SessionBreakdown {
+  sessionId: string;
+  task: string;
+  status: string;
+  tokenUsage: { prompt: number; completion: number; total: number };
+  estimatedCostUsd: number;
+  avgLatencyMs: number;
+  providers: ProviderBreakdown[];
+  toolCalls: {
+    total: number;
+    success: number;
+    error: number;
+    byTool: Record<string, { total: number; success: number; error: number; avgDurationMs: number }>;
+  };
+  timeline: Array<{
+    timestamp: string;
+    type: string;
+    tokensUsed?: number;
+    toolName?: string;
+    success?: boolean;
+    durationMs?: number;
+  }>;
+}
+
 interface Stats {
   totalSessions: number;
   successRate: number;
   errorRate: number;
   totalTokens: number;
+  totalPromptTokens: number;
+  totalCompletionTokens: number;
+  totalEstimatedCostUsd: number;
+  avgLatencyMs: number;
+  avgTokensPerSession: number;
 }
 
 const API_BASE = '/api';
@@ -37,6 +83,7 @@ function App() {
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [sessionLogs, setSessionLogs] = useState<LogEntry[]>([]);
+  const [sessionBreakdown, setSessionBreakdown] = useState<SessionBreakdown | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -82,9 +129,14 @@ function App() {
 
   const fetchSessionLogs = async (id: string) => {
     try {
-      const res = await fetch(`${API_BASE}/sessions/${id}`);
-      const data = await res.json();
-      setSessionLogs(data);
+      const [logsRes, breakdownRes] = await Promise.all([
+        fetch(`${API_BASE}/sessions/${id}`),
+        fetch(`${API_BASE}/sessions/${id}/breakdown`)
+      ]);
+      const logsData = await logsRes.json();
+      const breakdownData = await breakdownRes.json();
+      setSessionLogs(logsData);
+      setSessionBreakdown(breakdownData);
       setSelectedSessionId(id);
     } catch (err) {
       console.error('Error fetching logs:', err);
@@ -98,6 +150,7 @@ function App() {
         setSessions([]);
         setStats(null);
         setSelectedSessionId(null);
+        setSessionBreakdown(null);
       } catch (err) {
         console.error('Error clearing logs:', err);
       }
@@ -109,7 +162,10 @@ function App() {
       try {
         await fetch(`${API_BASE}/sessions/${id}`, { method: 'DELETE' });
         setSessions(sessions.filter(s => s.id !== id));
-        if (selectedSessionId === id) setSelectedSessionId(null);
+        if (selectedSessionId === id) {
+          setSelectedSessionId(null);
+          setSessionBreakdown(null);
+        }
       } catch (err) {
         console.error('Error deleting session:', err);
       }
@@ -121,8 +177,9 @@ function App() {
       return (
         <SessionDetail 
           sessionId={selectedSessionId} 
-          logs={sessionLogs} 
-          onBack={() => setSelectedSessionId(null)}
+          logs={sessionLogs}
+          breakdown={sessionBreakdown}
+          onBack={() => { setSelectedSessionId(null); setSessionBreakdown(null); }}
           onDelete={() => deleteSession(selectedSessionId)}
         />
       );
@@ -153,6 +210,7 @@ function App() {
         onTabChange={(tab) => {
           setActiveTab(tab);
           setSelectedSessionId(null);
+          setSessionBreakdown(null);
         }} 
         onClearLogs={clearAllLogs}
       />

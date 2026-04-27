@@ -54,9 +54,9 @@ export class ExperienceManager {
     if (!this.connection) throw new Error('LanceDB not initialized');
 
     if (this.table) {
-      await this.table.add([record]);
+      await this.table.add([record as unknown as Record<string, unknown>]);
     } else {
-      this.table = await this.connection.createTable('experiences', [record]);
+      this.table = await this.connection.createTable('experiences', [record as unknown as Record<string, unknown>]);
     }
     
     console.log(`[ExperienceManager] Nova experiência registrada: ${task.slice(0, 50)}...`);
