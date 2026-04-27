@@ -366,6 +366,12 @@ export type CodeLanguage =
   | 'javascript'
   | 'jsx'
   | 'json'
+  | 'python'
+  | 'sql'
+  | 'yaml'
+  | 'dockerfile'
+  | 'terraform'
+  | 'markdown'
   | 'unknown';
 
 export interface SourcePosition {

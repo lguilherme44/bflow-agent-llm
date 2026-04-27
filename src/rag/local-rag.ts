@@ -666,7 +666,8 @@ export class LocalRagService {
 }
 
 function isIndexable(filepath: string): boolean {
-  return ['.ts', '.tsx', '.js', '.jsx', '.json', '.md'].includes(path.extname(filepath).toLowerCase());
+  return ['.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.py', '.pyw', '.sql', '.yml', '.yaml', '.tf', '.tfvars'].includes(path.extname(filepath).toLowerCase())
+    || path.basename(filepath).toLowerCase().startsWith('dockerfile');
 }
 
 function ownerFromPath(filepath: string): string | undefined {

@@ -4,22 +4,29 @@ import { CodeLanguage, SourcePosition, SourceRange, TextPatch } from '../types/i
 
 export function detectLanguage(filepath: string): CodeLanguage {
   const ext = path.extname(filepath).toLowerCase();
+  const basename = path.basename(filepath).toLowerCase();
+  
+  // By extension
   switch (ext) {
-    case '.ts':
-      return 'typescript';
-    case '.tsx':
-      return 'tsx';
-    case '.js':
-    case '.mjs':
-    case '.cjs':
-      return 'javascript';
-    case '.jsx':
-      return 'jsx';
-    case '.json':
-      return 'json';
-    default:
-      return 'unknown';
+    case '.ts': return 'typescript';
+    case '.tsx': return 'tsx';
+    case '.js': case '.mjs': case '.cjs': return 'javascript';
+    case '.jsx': return 'jsx';
+    case '.json': return 'json';
+    case '.py': case '.pyw': return 'python';
+    case '.sql': case '.psql': return 'sql';
+    case '.yml': case '.yaml': return 'yaml';
+    case '.tf': case '.tfvars': return 'terraform';
+    case '.md': case '.mdx': return 'markdown';
   }
+  
+  // By filename (no extension or special names)
+  if (basename === 'dockerfile' || basename.startsWith('dockerfile.')) return 'dockerfile';
+  if (basename === 'docker-compose.yml' || basename === 'docker-compose.yaml') return 'yaml';
+  if (basename === 'makefile') return 'dockerfile'; // Treat as similar
+  if (basename === 'pyproject.toml') return 'python';
+  
+  return 'unknown';
 }
 
 export function hashContent(content: string): string {
