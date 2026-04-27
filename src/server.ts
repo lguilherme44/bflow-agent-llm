@@ -12,6 +12,7 @@ import { DashboardService } from './observability/dashboard-service.js';
 import { CheckpointManager, FileCheckpointStorage } from './state/checkpoint.js';
 import { createDevelopmentToolRegistry } from './tools/development-tools.js';
 import { loadEnv } from './utils/env.js';
+import { LocalRagService } from './rag/local-rag.js';
 
 loadEnv();
 
@@ -30,6 +31,7 @@ const tracing = new TracingService({
   consoleExporter: false 
 });
 const dashboard = new DashboardService(path.join(workspaceRoot, '.agent', 'logs'));
+const ragService = new LocalRagService(workspaceRoot);
 
 const providerName = (process.env.AGENT_LLM_PROVIDER || 'ollama') as any;
 const provider = providerName === 'ollama' 
@@ -51,12 +53,12 @@ const orchestrator = new OrchestratorAgent({
   contextManager,
   logger,
   tracing,
-  humanApprovalCallback: async () => true, // Auto-approve for IDE integration
+  humanApprovalCallback: async () => true,
   llmConfig: {
     model: provider.defaultModel,
     temperature: 0.2,
   },
-});
+}, undefined, ragService);
 
 // Create Server
 const server = http.createServer(async (req, res) => {

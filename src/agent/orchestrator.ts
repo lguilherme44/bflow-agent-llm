@@ -22,6 +22,7 @@ import { TerminalService } from '../code/terminal-service.js';
 import { HookService } from './hook-service.js';
 import { MCPManager } from '../mcp/mcp-manager.js';
 import { ExperienceManager } from '../state/experience-manager.js';
+import type { LocalRagService } from '../rag/local-rag.js';
 
 export type OrchestratorEvent = 
   | { type: 'phase_start'; phase: string }
@@ -58,8 +59,9 @@ export class OrchestratorAgent {
   private mcpManager: MCPManager;
   private mcpInitialized: boolean = false;
   private experienceManager: ExperienceManager;
+  private ragService?: LocalRagService;
 
-  constructor(private config: ReActConfig, feedbackPolicy?: Partial<FeedbackLoopPolicy>) {
+  constructor(private config: ReActConfig, feedbackPolicy?: Partial<FeedbackLoopPolicy>, ragService?: LocalRagService) {
     const languageInstruction = "\n\nIMPORTANT: Always respond in the same language as the user's prompt. If the user speaks Portuguese, you MUST respond in Portuguese.";
     
     this.config.llmConfig = {
@@ -76,6 +78,7 @@ export class OrchestratorAgent {
     this.workspaceManager = new WorkspaceManager(this.workspaceRoot, terminal);
     this.mcpManager = new MCPManager(this.config.logger);
     this.experienceManager = new ExperienceManager(this.workspaceRoot);
+    this.ragService = ragService;
     this.liveConfig = {
         ...this.config,
         onUpdate: (event) => {
@@ -267,11 +270,30 @@ export class OrchestratorAgent {
     notify({ type: 'message_added', role: 'system', content: 'Iniciando fase de pesquisa...' });
     logger?.logEvent(state.id, 'phase_started', { phase: 'Research' });
     
+    // Pre-load RAG context before Research
+    let ragContext = '';
+    if (this.ragService) {
+      try {
+        const ragSpan = tracing?.startPhaseSpan('RAG Pre-load', orchestratorSpan);
+        await this.ragService.indexWorkspace('.');
+        ragContext = await this.ragService.getContextForPrompts(task, 2000, 0.05);
+        if (ragContext) {
+          notify({ type: 'message_added', role: 'system', content: `RAG: ${ragContext.length} chars de contexto relevante pré-carregado.` });
+          logger?.logEvent(state.id, 'rag_preloaded', { charsLoaded: ragContext.length });
+        }
+        ragSpan?.end();
+      } catch (err) {
+        logger?.logEvent(state.id, 'rag_preload_failed', { error: String(err) });
+      }
+    }
+    
     const researchSpan = tracing?.startPhaseSpan('Research', orchestratorSpan);
     let researchResult;
     let brief: ResearchBrief | null = null;
     try {
-        researchResult = await this.researchAgent.run(task, undefined, researchSpan);
+        // Inject RAG context into the research task
+        const enrichedTask = ragContext ? `${ragContext}\n\nTarefa original:\n${task}` : task;
+        researchResult = await this.researchAgent.run(enrichedTask, undefined, researchSpan);
         state = researchResult.state;
         brief = researchResult.brief;
 
