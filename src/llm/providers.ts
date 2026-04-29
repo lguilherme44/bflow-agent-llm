@@ -91,16 +91,33 @@ abstract class BaseHttpProvider implements LLMProvider {
   async complete(request: LLMProviderRequest): Promise<LLMProviderResponse> {
     const startedAt = Date.now();
     const model = request.config?.model ?? this.defaultModel;
-    const response = await fetch(this.endpoint(), {
-      method: 'POST',
-      headers: this.headers(),
-      body: JSON.stringify(this.body(request, model)),
-      signal: request.signal,
-    });
+    
+    let response: Response;
+    try {
+      response = await fetch(this.endpoint(), {
+        method: 'POST',
+        headers: this.headers(),
+        body: JSON.stringify(this.body(request, model)),
+        signal: request.signal,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      let hint = '';
+      if (msg.includes('fetch failed')) {
+        hint = `\n💡 DICA: Verifique se o seu servidor local (${this.name}) está rodando.`;
+        if (this.name === 'ollama') hint += ' Tente "ollama serve".';
+        if (this.name === 'lmstudio') hint += ' Verifique se o servidor do LM Studio está ON.';
+      }
+      throw new Error(`${this.name} falhou ao conectar: ${msg}.${hint}`);
+    }
 
     if (!response.ok) {
       const text = await response.text();
-      throw new Error(`${this.name} provider failed: ${response.status} ${text}`);
+      let hint = '';
+      if (response.status === 404) {
+        hint = `\n💡 DICA: Endpoint não encontrado (404). Verifique se o provider "${this.name}" está correto para esta porta no .agentrc.`;
+      }
+      throw new Error(`${this.name} provider failed: ${response.status} ${text}.${hint}`);
     }
 
     const payload = (await response.json()) as Record<string, unknown>;

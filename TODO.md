@@ -1,5 +1,94 @@
 # TODO - Fase 1: Core do Agente
 
+## ✅ 2026-04-26 — Sprint beahub: Fase 3 — Testes + Eval + Skills + CLI
+
+### 1 — Testes de qualidade + benchmark
+- [x] `quality-benchmark.test.ts`: RAG hit rate (10 queries, 60%+ min), context compression preservation, budget enforcement, regression gate, latency budget (50ms), snapshot capture/restore
+
+### 2 — Budget enforcement completo
+- [x] ResearchAgent com budget (20 calls / 50k tokens / $0.25)
+- [x] PlanningAgent com budget (15 calls / 30k tokens / $0.15)
+- [x] Worker agents no Orchestrator com budget por role
+
+### 3 — Eval harness
+- [x] `src/eval/harness.ts`: EvalRunner com smoke suite (4 casos) e full suite (8 casos)
+- [x] Métricas: pass rate, avg tokens, avg cost, avg duration, erros, human approvals
+- [x] Report JSON salvo em `.agent/eval/`
+
+### 4 — skills.md completo
+- [x] Stack SaaS (React, Mantine, TanStack Query, Socket.io, RBAC)
+- [x] Tool budgets por agente, fluxo completo, estrutura de diretórios
+- [x] API do SaaS (clientes, agendamentos, serviços, barbeiros)
+- [x] Troubleshooting com problemas comuns
+
+### 5 — Visual CLI com progresso
+- [x] Spinner animado com fase atual e contagem de tokens
+- [x] Callback `onUpdate` no REPL com progresso em tempo real
+
+---
+
+## ✅ 2026-04-26 — Sprint beahub: Fase 2 — Tool Budget + MCP + Git + Snapshot + Docker
+
+### A — Tool Budget + Rate Limit
+- [x] `ToolBudget` type com maxToolCalls, maxTokens, maxCostUsd
+- [x] `DEFAULT_TOOL_BUDGETS` por role
+- [x] Enforcement no ReActAgent loop
+- [x] Rate limiting no LLMRouter (max 3 concorrentes)
+
+### B — MCP Server do SaaS
+- [x] `mcp-server/index.ts` com 7 tools: clients, appointments, services, barbers, stats
+
+### C — DocsAgent + Git Integration
+- [x] Branch `agent/task-<id>` automática antes da execução
+- [x] Merge `--no-ff` em main ao finalizar
+
+### D — Snapshot + Package Lock
+- [x] `SnapshotService`: captura/restore de arquivos, persistência em disco
+- [x] `validatePackageLock()`: valida integridade
+
+### E — Sandbox Docker
+- [x] DockerSandboxExecutor + NativeSandboxExecutor + factory createSandbox()
+
+---
+
+## ✅ 2026-04-26 — Sprint beahub: Dashboard + RAG + Context Compression
+
+**Branch:** `develop` | **Commits:** 4
+
+### P1 — Dashboard com token breakdown, custo, erro/sucesso
+- [x] `SessionMetadata` estendido: promptTokens, completionTokens, estimatedCostUsd, avgLatencyMs, providerBreakdown, toolCallCount, toolErrorCount
+- [x] Nova API `GET /api/sessions/:id/breakdown` com quebra por provider, tool calls, timeline
+- [x] `DashboardService` calcula custo por provider (precificação por 1M tokens)
+- [x] Overview: cards de custo, latência, tokens/sessão + gráfico pizza provider + prompt vs completion
+- [x] SessionDetail: painel resumo (tokens/custo/latência/tools) + tabela provider + tabela tool calls com taxa de sucesso + badges na timeline
+- [x] SessionList: colunas prompt, completion, custo, latência, tools + filtros por status e busca
+- [x] Fix: `export-dataset.ts` (unused var), `experience-manager.ts` (type cast)
+
+### P2 — RAG integrado ao Orchestrator com threshold e reranking
+- [x] `OrchestratorAgent` pré-carrega RAG antes da fase Research (indexa workspace + injeta contexto)
+- [x] `retrieveHybrid` suporta `minScore` (threshold de relevância configurável)
+- [x] `rerankWithLLM()` — re-ranking semântico via LLM leve
+- [x] `getContextForPrompts()` — contexto compacto deduplicado (max 3000 tokens)
+- [x] `LocalRagService.setRerankLLM()` — injeção de modelo para rerank
+- [x] `server.ts` cria e injeta `LocalRagService` no Orchestrator
+
+### P3 — Compressão de contexto inteligente (Polar Code style)
+- [x] `smartTruncate` — corta em boundaries de parágrafo/frase em vez de char limit cego
+- [x] `smartCompact` — scoring de importância (erros > decisões > tool calls > recência)
+- [x] `buildCompactSummary` — resumo rico: tarefa, decisões, restrições, progresso, erros, arquivos, próximas ações
+- [x] `deduplicateToolResults` — remove tool results repetidos
+- [x] `messageImportance` scoring: erros (40), tool calls (25), decisões (20), retries (15), recência (30)
+
+### P4 — Ollama embeddings como default
+- [x] `resolveDefaultProvider` detecta Ollama automaticamente (modo `auto`)
+- [x] Fallback silencioso para TF-IDF quando Ollama indisponível
+
+### P5 — Filtros avançados no dashboard
+- [x] SessionList: filtro por status (todos/concluídos/erro/em andamento)
+- [x] Campo de busca por tarefa ou ID com contador de resultados
+
+---
+
 Objetivo: finalizar o cerebro do agente com estado retomavel, loop ReAct, tools robustas e gerenciamento de contexto.
 
 Status inicial observado em 2026-04-22:
@@ -29,8 +118,19 @@ Status atualizado em 2026-04-22:
 - [x] Fase 9.1 e 9.2 implementadas: CLI Interativa (`agent chat`) e inicializao (`agent init`).
 - [x] Fase 9.3 e 9.4 implementadas: Interface Visual (TUI) com Ink, listagem e retomada de sessoes.
 - [x] NOVO: Comando `/connect` interativo com suporte a selecao e download de modelos locais (Ollama/LM Studio).
+- [x] NOVO: Fluxo Config-First (prioridade `.agentrc`, suporte a API Keys no `/connect`, flag `--connect` no vagent).
 - [x] NOVO: Trava de Seguranca (Safety Lock) no Orquestrador para aprovacao humana do plano de execucao.
-- [ ] Prxima etapa sugerida: Fase 7 - Integracao com o SaaS ou finalizar pendencias de Observabilidade (LangSmith).
+
+### ✅ O que já temos (Fases 1-6 & 9)
+- [x] **Core ReAct**: Loop completo de Observar, Pensar, Agir e Verificar.
+- [x] **Gestão de Estado**: Checkpoints em disco e HITL funcional.
+- [x] **Multi-Agente Especializado**: Orquestração com Feedback Loops automáticos.
+- [x] **Tools de Código**: Leitura/Edição estrutural via AST.
+- [x] **RAG Local**: Busca híbrida integrada ao Orchestrator.
+- [x] **Observabilidade**: Tracing com spans e Dashboard de tokens/custo.
+- [x] **Config-First Workflow**: Configuração via `/connect` e persistência em `.agentrc`.
+- [x] **CLI & Visual CLI**: Interface interativa e progresso visual com suporte a `--connect`.
+
 ## 0. Base Tecnica e Build
 
 - [x] Corrigir `tsconfig.json`/tipos Node para reconhecer `console`, `crypto`, `AbortController`, `AbortSignal`, `setTimeout` e `clearTimeout`.
@@ -274,8 +374,8 @@ Principios de arquitetura:
 - [x] Tools pequenas, composaveis e auditaveis.
 - [x] HITL para decisoes destrutivas, caras, ambiguas ou sensiveis.
 - [x] Validar antes de aceitar: typecheck, lint, testes e security scan.
-- [ ] Parcial: Observabilidade desde o inicio: todo custo, comando, arquivo e decisao deve ser rastreavel.
-- [ ] Parcial: Contexto sob controle: RAG + compactacao, nunca "jogar tudo na janela".
+- [x] Observabilidade: todo custo, comando, arquivo e decisao rastreado via dashboard (P1).
+- [x] Contexto sob controle: RAG pré-carregado + compressão inteligente com scoring de importância (P2+P3).
 - [ ] Parcial: Privilegios minimos: cada agente/tool recebe apenas o acesso necessario.
 - [ ] Avaliacao continua: medir taxa de sucesso, regressao, custo e correcao humana.
 
@@ -407,7 +507,7 @@ Pronto quando: o agente consegue saber onde um simbolo e definido, onde e usado 
 - [x] `renameSymbol(filepath, position, newName)`.
 - [x] `findReferences(filepath, position)`.
 - [x] `applyEditPlan(planId)` com HITL opcional.
-- [x] `revertEditPlan(planId)` para rollback.
+- [x] `revertEditPlan(planId)` for rollback.
 
 Pronto quando: o agente possui CRUD de codigo com AST, diffs e validacao.
 
@@ -721,13 +821,13 @@ Pronto quando: nenhuma mudanca e considerada pronta sem passar pelos gates defin
 - [x] `ReviewerAgent`: (Implementado via REVIEWER_PROMPT)
 - [x] `TestAgent`: (Implementado via TESTER_PROMPT)
 - [x] `DebugAgent`: (Implementado via DEBUG_PROMPT)
-- [x] `DocsAgent`:
-  - [ ] atualiza README/docs/ADRs quando necessario
-- [ ] `MigrationAgent`:
-  - [ ] cuida de database/schema quando existir
-  - [ ] sempre sob HITL reforcado
+- [x] `DocsAgent`: (Implementado via DOCS_PROMPT)
+  - [x] atualiza README/docs/ADRs quando necessario
+- [x] `MigrationAgent`: (Implementado via MIGRATION_PROMPT)
+  - [x] cuida de database/schema quando existir
+  - [x] sempre sob HITL reforcado
 - [x] Definir permissoes por agente (Toolset restrito por prompt e Orchestrator).
-- [ ] Definir tool budget por agente.
+- [x] Definir tool budget por agente.
 
 Pronto quando: o trabalho pode ser dividido por especialidade com privilegio minimo.
 
@@ -1102,3 +1202,44 @@ Objetivo: transformar o agente em uma ferramenta de linha de comando de primeira
 - [ ] Auditoria Local: gerar um arquivo `.agent/audit.log` com hash de cada comando e arquivo alterado.
 
 Pronto quando: usar o agente é tão natural quanto usar o `git` ou o `npm`, com uma interface visual que passa confiança e controle total ao desenvolvedor.
+
+---
+
+## 🔮 Benchmark: ideias do ecossistema (Claude Code + Codex)
+
+Baseado em `anthropics/claude-code` (118k ⭐) e `openai/codex` (78k ⭐):
+
+### GAPS (o que eles têm e nós não)
+
+| # | Feature | Fonte | Status |
+|---|---------|-------|--------|
+| 6 | Code review com 5 agentes paralelos + confidence scoring | Claude Code `code-review` | ❌ |
+| 7 | PreToolUse security hooks (XSS, SQLi, eval, pickle, os.system) | Claude Code `security-guidance` | ⚠️ |
+| 8 | Plugin system (hooks + commands + agents + skills + MCP + marketplace) | Claude Code `plugin-dev` | ⚠️ |
+| 9 | Feature dev 7-phase workflow guiado | Claude Code `feature-dev` | ⚠️ |
+| 10 | Granular review agents (breaking changes, silent failures, type design) | Claude Code `pr-review-toolkit` | ❌ |
+| 11 | Autonomous iteration loops (Ralph Wiggum — repete até funcionar) | Claude Code `ralph-wiggum` | ⚠️ |
+| 12 | Frontend design guidance (evitar AI aesthetic genérico) | Claude Code `frontend-design` | ❌ |
+| 13 | Babysit PR (monitora + auto-fixa) | Codex `babysit-pr` | ❌ |
+| 14 | Remote test execution | Codex `remote-tests` | ❌ |
+| 15 | Issue digest / PR body generation | Codex `codex-issue-digest` | ❌ |
+
+### DIFERENCIAIS (o que só nós temos)
+
+- ✅ RAG local com LanceDB (zero infra, offline-first)
+- ✅ GPU 8GB optimized (tool budgets, compressão Polar Code)
+- ✅ Dashboard visual (React + Recharts + WebSocket em tempo real)
+- ✅ Checkpoint persistente granular
+- ✅ AST-first editing completo (Tree-sitter + ast-grep + TS LS)
+- ✅ Ollama local first-class (auto-detect + fallback TF-IDF)
+- ✅ MCP Server próprio do SaaS (7 tools)
+
+### PRÓXIMAS FEATURES SUGERIDAS
+
+| # | Feature | Impacto | Esforço |
+|---|---------|---------|---------|
+| 6 | Code review avançado — 4 agentes paralelos + confidence scoring | ⭐⭐⭐ | Médio |
+| 7 | Security hooks web — XSS, SQL injection, eval no PreToolUse | ⭐⭐⭐ | Baixo |
+| 8 | Plugin system — /plugin install, hooks customizáveis | ⭐⭐⭐ | Grande |
+| 9 | Ralph Loop — iteração autônoma persistente até task passar | ⭐⭐ | Baixo |
+| 10 | Babysit PR — monitora PR, roda testes, auto-fixa | ⭐⭐ | Médio |

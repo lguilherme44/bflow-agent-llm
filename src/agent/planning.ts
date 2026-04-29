@@ -1,6 +1,6 @@
 import { Span } from '@opentelemetry/api';
 import { ReActAgent, ReActConfig } from './react-loop.js';
-import { AgentState, ExecutionPlan, ResearchBrief } from '../types/index.js';
+import { AgentState, ExecutionPlan, ResearchBrief, DEFAULT_TOOL_BUDGETS } from '../types/index.js';
 import { createTool } from '../tools/schema.js';
 import { ToolRegistry } from '../tools/registry.js';
 
@@ -83,6 +83,7 @@ export class PlanningAgent {
 
     this.reactAgent = new ReActAgent({
       ...config,
+      toolBudget: DEFAULT_TOOL_BUDGETS.planner,
       registry: planningRegistry,
       llmConfig: {
         ...config.llmConfig,

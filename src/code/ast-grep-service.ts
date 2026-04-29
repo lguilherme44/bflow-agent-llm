@@ -111,6 +111,7 @@ export class AstGrepService {
         return Lang.JavaScript;
       case 'json':
       case 'unknown':
+      default:
         return undefined;
     }
   }

@@ -127,6 +127,8 @@ export class TreeSitterParserService {
         return JavaScriptGrammar;
       case 'json':
         return JsonGrammar;
+      default:
+        return undefined;
       case 'unknown':
         return JavaScriptGrammar;
     }

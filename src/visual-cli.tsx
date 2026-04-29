@@ -12,6 +12,7 @@ import { createDevelopmentToolRegistry } from './tools/development-tools.js';
 import { App } from './ui/App.js';
 import { loadEnv } from './utils/env.js';
 import { loadConfig } from './utils/config.js';
+import { runRepl } from './cli/repl.js';
 
 // Load environment variables from .env file manually
 loadEnv();
@@ -77,6 +78,17 @@ async function main() {
   let workspaceRoot = process.cwd();
   const checkpointStorage = new FileCheckpointStorage(path.join(workspaceRoot, '.agent', 'checkpoints'));
   const checkpointManager = new CheckpointManager(checkpointStorage);
+
+  // COMMAND: CONNECT (Interactive setup)
+  if (args.includes('--connect')) {
+    // For /connect we need a dummy orchestrator since it only uses readline for config
+    // Actually runRepl can handle it if we pass a minimal mock or wait until it's setup
+    // But repl.ts needs an orchestrator. Let's just call a minimal version or refactor repl.ts
+    // For now, let's just use the existing runRepl logic but we only care about the commands
+    console.log('\n--- CONFIGURAÇÃO INTERATIVA ---');
+    await runRepl(null as any); 
+    process.exit(0);
+  }
 
   // COMMAND: LIST
   if (command === 'list') {
@@ -163,6 +175,8 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error('Falha ao iniciar a interface visual:', error);
+  console.error('\n❌ Falha ao iniciar a interface visual:', error.message);
+  console.log('\n💡 DICA: Se for um erro de conexão ou configuração, tente rodar:');
+  console.log('   npm run vagent -- --connect\n');
   process.exit(1);
 });

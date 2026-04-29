@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import picocolors from 'picocolors';
 
 export interface AgentConfig {
   provider: 'openai' | 'anthropic' | 'openrouter' | 'lmstudio' | 'ollama';
@@ -27,9 +28,22 @@ export function loadConfig(workspaceRoot: string = process.cwd()): AgentConfig {
 
   try {
     const content = fs.readFileSync(configPath, 'utf-8');
-    return JSON.parse(content);
+    const parsed = JSON.parse(content) as AgentConfig;
+    
+    // Basic validation
+    const validProviders = ['openai', 'anthropic', 'openrouter', 'lmstudio', 'ollama'];
+    if (!validProviders.includes(parsed.provider)) {
+      console.warn(picocolors.yellow(`Aviso: Provider "${parsed.provider}" no ${CONFIG_FILE} é inválido. Usando "lmstudio" como fallback.`));
+      parsed.provider = 'lmstudio';
+    }
+
+    return {
+      ...parsed,
+      // Priority: .agentrc value > .env value (handled by loadConfig returning the object)
+      apiKey: parsed.apiKey || process.env.OPENAI_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.OPENROUTER_API_KEY,
+    };
   } catch (error) {
-    console.error(`Erro ao ler ${CONFIG_FILE}:`, error);
+    console.error(picocolors.red(`Erro ao ler ou processar ${CONFIG_FILE}:`), error instanceof Error ? error.message : error);
     return { provider: 'lmstudio' };
   }
 }

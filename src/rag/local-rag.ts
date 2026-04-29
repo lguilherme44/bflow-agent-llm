@@ -23,6 +23,8 @@ export interface RetrieveContextInput {
     chunkKinds?: RetrievalChunkMetadata['chunkKind'][];
   };
   limit?: number;
+  /** Minimum relevance score (0-1). Results below this are filtered out. Default: 0.05 */
+  minScore?: number;
 }
 
 export interface RagIndexStats {
@@ -31,11 +33,18 @@ export interface RagIndexStats {
   skippedFiles: number;
 }
 
+/** Simple LLM interface for reranking (lightweight — just needs complete()) */
+export interface RerankLLM {
+  complete(messages: Array<{ role: string; content: string }>, config?: Record<string, unknown>): Promise<{ content: string }>;
+}
+
 export class LocalRagService {
   private readonly chunks = new Map<string, RetrievalChunk>();
   private readonly fileHashes = new Map<string, string>();
   private lunrIndex: lunr.Index | null = null;
   private readonly vectorStore: LanceDBStore;
+  private rerankLLM?: RerankLLM;
+  private readonly defaultMinScore = 0.0; // No filtering by default — opt-in via input.minScore
 
   constructor(
     private readonly workspaceRoot = process.cwd(),
@@ -47,25 +56,28 @@ export class LocalRagService {
   }
 
   private resolveDefaultProvider(): EmbeddingProvider {
-    const type = process.env.EMBEDDING_PROVIDER || 'tf-idf';
+    const type = process.env.EMBEDDING_PROVIDER || 'auto';
 
-    if (type === 'ollama') {
-      const model = process.env.OLLAMA_EMBED_MODEL;
-      const baseUrl = process.env.OLLAMA_BASE_URL;
-      const dimensions = Number.parseInt(process.env.OLLAMA_EMBED_DIMENSIONS || '1024');
+    // Detect Ollama if available
+    if (type === 'ollama' || type === 'auto') {
+      const model = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
+      const baseUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
+      const dimensions = Number.parseInt(process.env.EMBEDDING_DIMENSIONS || '768', 10);
 
-      if (!model || !baseUrl) {
-        throw new Error('OLLAMA_EMBED_MODEL and OLLAMA_BASE_URL must be set when EMBEDDING_PROVIDER is "ollama"');
+      // Try Ollama — if it fails, fall back to TF-IDF
+      try {
+        return new OllamaEmbeddingProvider(dimensions, model, baseUrl);
+      } catch {
+        // Ollama unavailable — use TF-IDF silently
       }
-
-      return new OllamaEmbeddingProvider(
-        dimensions,
-        model,
-        baseUrl
-      );
     }
 
     return new TfIdfEmbeddingProvider();
+  }
+
+  /** Inject a lightweight LLM for semantic reranking of retrieval results */
+  setRerankLLM(llm: RerankLLM): void {
+    this.rerankLLM = llm;
   }
 
   async indexWorkspace(directory = '.'): Promise<RagIndexStats> {
@@ -139,6 +151,7 @@ export class LocalRagService {
    */
   async retrieveHybrid(input: RetrieveContextInput): Promise<RetrievalResult[]> {
     const limit = input.limit ?? 8;
+    const minScore = input.minScore ?? this.defaultMinScore;
     const filteredChunks = Array.from(this.chunks.values()).filter((chunk) =>
       this.matchesFilters(chunk, input.filters)
     );
@@ -163,7 +176,25 @@ export class LocalRagService {
     // 6. Combine with RRF
     const combined = RankingUtils.rrf([lexicalResults, recencyResults, centralityResults, vectorResults, filenameResults]);
 
-    return combined.slice(0, limit).map(({ item, score }) => {
+    // 7. Filter by relevance threshold
+    const aboveThreshold = combined.filter(({ score }) => score >= minScore);
+
+    // 8. If we have a rerank LLM, semantic-rerank the top candidates
+    const candidates = aboveThreshold.slice(0, limit * 2);
+    let finalResults: Array<{ item: RetrievalChunk; score: number }>;
+    
+    if (this.rerankLLM && candidates.length > 1) {
+      try {
+        finalResults = await this.rerankWithLLM(candidates, input.task);
+      } catch {
+        // LLM rerank failed, fall back to score-based sorting
+        finalResults = candidates.sort((a, b) => b.score - a.score);
+      }
+    } else {
+      finalResults = candidates.sort((a, b) => b.score - a.score);
+    }
+
+    return finalResults.slice(0, limit).map(({ item, score }) => {
       const reasons: string[] = [];
       if (lexicalResults.includes(item)) reasons.push('lexical match');
       if (recencyResults.slice(0, 10).includes(item)) reasons.push('recent file');
@@ -205,6 +236,93 @@ export class LocalRagService {
         return boost;
       }
     ).then(items => items.map(i => i.item));
+  }
+
+  /**
+   * Use a lightweight LLM to semantically re-rank retrieval candidates.
+   * Sends top candidates to LLM asking it to rank by relevance.
+   */
+  private async rerankWithLLM(
+    candidates: Array<{ item: RetrievalChunk; score: number }>,
+    query: string
+  ): Promise<Array<{ item: RetrievalChunk; score: number }>> {
+    if (!this.rerankLLM || candidates.length <= 1) {
+      return candidates.sort((a, b) => b.score - a.score);
+    }
+
+    // Build a compact prompt for reranking
+    const chunksList = candidates.map((c, i) => {
+      const symbolStr = c.item.metadata.symbols.slice(0, 5).join(', ');
+      return `${i}: ${c.item.metadata.filepath} [${c.item.metadata.chunkKind}] symbols: ${symbolStr || 'none'}\n   preview: ${c.item.content.slice(0, 200)}`;
+    }).join('\n');
+
+    const prompt = `Task: "${query.slice(0, 200)}"\n\nRank these code chunks by relevance (0-10). Return JSON array of {index, score}:\n\n${chunksList}\n\nReturn ONLY: [{"index": 0, "score": 8}, ...]`;
+
+    try {
+      const response = await this.rerankLLM.complete([
+        { role: 'system', content: 'You are a code relevance ranker. Return ONLY a JSON array.' },
+        { role: 'user', content: prompt },
+      ], { temperature: 0, maxTokens: 200 });
+
+      const jsonMatch = response.content.match(/\[[\s\S]*\]/);
+      if (jsonMatch) {
+        const rankings = JSON.parse(jsonMatch[0]) as Array<{ index: number; score: number }>;
+        const scoreMap = new Map(rankings.map(r => [r.index, r.score / 10]));
+
+        return candidates
+          .map((c, i) => ({ ...c, score: scoreMap.get(i) ?? c.score }))
+          .sort((a, b) => b.score - a.score);
+      }
+    } catch {
+      // LLM rerank failed — fall through to default
+    }
+
+    return candidates.sort((a, b) => b.score - a.score);
+  }
+
+  /**
+   * Build a compact context string from top RAG results for injection into LLM prompts.
+   * Deduplicates and limits output size for efficient context usage.
+   */
+  async getContextForPrompts(task: string, maxTokens = 3000, minScore = 0.05): Promise<string> {
+    const results = await this.retrieveHybrid({ task, minScore, limit: 12 });
+    if (results.length === 0) return '';
+
+    const seen = new Set<string>();
+    const lines: string[] = [];
+    let tokenBudget = maxTokens;
+
+    for (const r of results) {
+      const fp = r.chunk.metadata.filepath;
+      if (seen.has(fp)) continue;
+      seen.add(fp);
+
+      const symbols = r.chunk.metadata.symbols.slice(0, 3).join(', ');
+      const line = `- \`${fp}\` [${r.chunk.metadata.chunkKind}] score=${r.score.toFixed(2)} symbols: ${symbols || 'none'}`;
+      const lineTokens = estimateTokensFromText(line);
+
+      if (tokenBudget < lineTokens) break;
+
+      // For top results, include a content snippet
+      if (r.score > 0.3 && tokenBudget > 300) {
+        const snippet = r.chunk.content.slice(0, 250).replace(/\n/g, ' ');
+        const snippetLine = `  > ${snippet}...`;
+        const snippetTokens = estimateTokensFromText(snippetLine);
+        if (tokenBudget > lineTokens + snippetTokens) {
+          lines.push(line);
+          lines.push(snippetLine);
+          tokenBudget -= lineTokens + snippetTokens;
+          continue;
+        }
+      }
+
+      lines.push(line);
+      tokenBudget -= lineTokens;
+    }
+
+    return lines.length > 0 
+      ? `\n<rag_context>\nArquivos relevantes encontrados:\n${lines.join('\n')}\n</rag_context>\n`
+      : '';
   }
 
   /**
@@ -548,7 +666,8 @@ export class LocalRagService {
 }
 
 function isIndexable(filepath: string): boolean {
-  return ['.ts', '.tsx', '.js', '.jsx', '.json', '.md'].includes(path.extname(filepath).toLowerCase());
+  return ['.ts', '.tsx', '.js', '.jsx', '.json', '.md', '.py', '.pyw', '.sql', '.yml', '.yaml', '.tf', '.tfvars'].includes(path.extname(filepath).toLowerCase())
+    || path.basename(filepath).toLowerCase().startsWith('dockerfile');
 }
 
 function ownerFromPath(filepath: string): string | undefined {

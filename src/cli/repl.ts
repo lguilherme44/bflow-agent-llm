@@ -139,12 +139,28 @@ export async function runRepl(
         model = await rl.question('Modelo (deixe em branco para o padrão): ');
       }
 
-      const baseUrl = await rl.question('Base URL (deixe em branco para o padrão): ');
+      let baseUrl = await rl.question('Base URL (deixe em branco para o padrão): ');
+      if (!baseUrl) {
+        if (provider === 'ollama') baseUrl = 'http://localhost:11434';
+        else if (provider === 'lmstudio') baseUrl = 'http://localhost:1234/v1';
+      }
       
       const newConfig: Partial<AgentConfig> = { provider };
       if (model) newConfig.model = model;
       if (baseUrl) newConfig.baseUrl = baseUrl;
 
+      let apiKey = '';
+      if (['openai', 'anthropic', 'openrouter'].includes(provider)) {
+        console.log(picocolors.yellow(`\nProvider ${provider} requer uma API Key.`));
+        apiKey = await rl.question('API Key (deixe em branco para usar a do .env): ');
+      }
+
+      const temperature = await rl.question('Temperatura (0.0 a 1.0, padrão 0.2): ');
+      const maxTokens = await rl.question('Max Tokens (padrão 2048): ');
+
+      if (apiKey) newConfig.apiKey = apiKey;
+      if (temperature) newConfig.temperature = parseFloat(temperature);
+      if (maxTokens) newConfig.maxTokens = parseInt(maxTokens);
 
       saveConfig(newConfig);
       
@@ -175,10 +191,12 @@ export async function runRepl(
 
 
   // Se houver uma tarefa inicial (passada via CLI), executa ela primeiro
-  if (currentTask) {
+  if (currentTask && currentOrchestrator) {
     console.log(picocolors.yellow(`Executando tarefa inicial: ${currentTask}`));
     await currentOrchestrator.run(currentTask);
     currentTask = undefined;
+  } else if (currentTask && !currentOrchestrator) {
+    console.log(picocolors.red('Aviso: Tarefa inicial ignorada pois não há orchestrator conectado. Use /connect primeiro.'));
   }
 
   while (true) {
@@ -190,6 +208,11 @@ export async function runRepl(
     }
 
     if (!input.trim()) continue;
+    
+    if (!currentOrchestrator && !input.startsWith('/')) {
+      console.log(picocolors.red('Erro: Você não está conectado a um provider. Use /connect para configurar.'));
+      continue;
+    }
 
     if (input.startsWith('/')) {
       const handled = await handleCommand(input);
@@ -199,7 +222,45 @@ export async function runRepl(
     console.log(picocolors.dim(`\n--- ${new Date().toLocaleTimeString()} ---`));
     
     try {
-      const result = await currentOrchestrator.run(input);
+      let currentPhase = '';
+      let lastUsage = { totalTokens: 0 };
+      let spinnerIdx = 0;
+      const spinnerFrames = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'];
+      
+      const progressInterval = setInterval(() => {
+        if (currentPhase) {
+          const frame = spinnerFrames[spinnerIdx % spinnerFrames.length];
+          process.stdout.write(`\r  ${picocolors.cyan(frame)} ${picocolors.bold(currentPhase)} ${picocolors.dim(`| ${lastUsage.totalTokens.toLocaleString()} tokens`)}   `);
+          spinnerIdx++;
+        }
+      }, 120);
+
+      const result = await currentOrchestrator.run(input, undefined, (event) => {
+        if (event.type === 'phase_start') {
+          currentPhase = event.phase;
+          if (event.phase === 'Chat' || event.phase === 'Resposta Direta') {
+            clearInterval(progressInterval);
+          }
+        } else if (event.type === 'phase_complete') {
+          currentPhase = '';
+        } else if (event.type === 'usage_update') {
+          lastUsage = event.usage;
+        } else if (event.type === 'message_added' && event.role === 'assistant') {
+          clearInterval(progressInterval);
+          process.stdout.write('\r' + ' '.repeat(60) + '\r'); // Clear spinner line
+          console.log(picocolors.green(`\n🤖 ${event.content.slice(0, 500)}${event.content.length > 500 ? '...' : ''}`));
+          
+          if (event.usage) {
+            console.log(picocolors.dim(`   📊 ${event.usage.totalTokens.toLocaleString()} tokens | ${event.latencyMs || 0}ms`));
+          }
+        } else if (event.type === 'error') {
+          process.stdout.write('\r' + ' '.repeat(60) + '\r');
+          console.error(picocolors.red(`\n❌ ${event.message}`));
+        }
+      });
+      
+      clearInterval(progressInterval);
+      process.stdout.write('\r' + ' '.repeat(60) + '\r'); // Clear spinner line
       
       if (result.state.status === 'completed') {
         // O resumo final já é notificado pelo orchestrator via callback se estiver configurado,

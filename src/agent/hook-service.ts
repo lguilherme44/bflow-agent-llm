@@ -2,11 +2,14 @@
 import { HookAction, HookEvaluation, HookRule, HookType } from '../types/index.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { SECURITY_HOOKS } from '../utils/security-hooks.js';
 
 export class HookService {
   private rules: HookRule[] = [];
 
   constructor(private workspaceRoot: string) {
+    // Always load security hooks
+    this.rules.push(...SECURITY_HOOKS);
     this.loadRules();
   }
 

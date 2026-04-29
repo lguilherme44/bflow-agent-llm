@@ -1,8 +1,38 @@
 {
   "mcpServers": {
-    "everything": {
-      "command": "npx",
-      "args": ["-y", "@modelcontextprotocol/server-everything"]
+    "postgresql": {
+      "command": "node",
+      "args": ["dist/mcp-connectors/postgresql/index.js"],
+      "env": {
+        "PGHOST": "localhost",
+        "PGPORT": "5432",
+        "PGDATABASE": "postgres",
+        "PGUSER": "postgres",
+        "PGPASSWORD": ""
+      },
+      "description": "PostgreSQL: queries, explain, slow queries, indexes, locks, vacuum"
+    },
+    "aws": {
+      "command": "node",
+      "args": ["dist/mcp-connectors/aws/index.js"],
+      "env": {
+        "AWS_REGION": "us-east-1"
+      },
+      "description": "AWS: S3, EC2, RDS, Lambda, CloudWatch logs/metrics"
+    },
+    "docker": {
+      "command": "node",
+      "args": ["dist/mcp-connectors/docker/index.js"],
+      "description": "Docker: containers, images, logs, stats, compose, prune"
+    },
+    "bflow-saas": {
+      "command": "node",
+      "args": ["dist/mcp-server/index.js"],
+      "env": {
+        "SAAS_API_URL": "http://localhost:3001",
+        "SAAS_API_KEY": ""
+      },
+      "description": "bflowbarber SaaS: clients, appointments, services, barbers, dashboard"
     }
   }
 }

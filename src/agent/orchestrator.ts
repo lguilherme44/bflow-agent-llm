@@ -1,6 +1,7 @@
 import { ReActAgent, ReActConfig } from './react-loop.js';
 import path from 'path';
-import { AgentState, ExecutionPlan, ExecutionStream, FeedbackIteration, FeedbackLoopPolicy, ResearchBrief } from '../types/index.js';
+import { execSync } from 'node:child_process';
+import { AgentState, ExecutionPlan, ExecutionStream, FeedbackIteration, FeedbackLoopPolicy, ResearchBrief, DEFAULT_TOOL_BUDGETS, ToolBudget } from '../types/index.js';
 import { ResearchAgent } from './research.js';
 import { PlanningAgent } from './planning.js';
 import { FeedbackLoopEngine } from './feedback-loop.js';
@@ -15,13 +16,16 @@ import {
     SECURITY_REVIEWER_PROMPT,
     PERFORMANCE_REVIEWER_PROMPT,
     UX_REVIEWER_PROMPT,
-    ERROR_HANDLING_REVIEWER_PROMPT
+    ERROR_HANDLING_REVIEWER_PROMPT,
+    DOCS_PROMPT,
+    MIGRATION_PROMPT
 } from '../prompts/specialized.js';
 import { WorkspaceManager } from '../code/workspace-manager.js';
 import { TerminalService } from '../code/terminal-service.js';
 import { HookService } from './hook-service.js';
 import { MCPManager } from '../mcp/mcp-manager.js';
 import { ExperienceManager } from '../state/experience-manager.js';
+import type { LocalRagService } from '../rag/local-rag.js';
 
 export type OrchestratorEvent = 
   | { type: 'phase_start'; phase: string }
@@ -58,8 +62,9 @@ export class OrchestratorAgent {
   private mcpManager: MCPManager;
   private mcpInitialized: boolean = false;
   private experienceManager: ExperienceManager;
+  private ragService?: LocalRagService;
 
-  constructor(private config: ReActConfig, feedbackPolicy?: Partial<FeedbackLoopPolicy>) {
+  constructor(private config: ReActConfig, feedbackPolicy?: Partial<FeedbackLoopPolicy>, ragService?: LocalRagService) {
     const languageInstruction = "\n\nIMPORTANT: Always respond in the same language as the user's prompt. If the user speaks Portuguese, you MUST respond in Portuguese.";
     
     this.config.llmConfig = {
@@ -76,6 +81,7 @@ export class OrchestratorAgent {
     this.workspaceManager = new WorkspaceManager(this.workspaceRoot, terminal);
     this.mcpManager = new MCPManager(this.config.logger);
     this.experienceManager = new ExperienceManager(this.workspaceRoot);
+    this.ragService = ragService;
     this.liveConfig = {
         ...this.config,
         onUpdate: (event) => {
@@ -159,20 +165,21 @@ export class OrchestratorAgent {
   private async ensureMcpReady() {
     if (this.mcpInitialized) return;
     
+    // Only load config (cheap) — don't connect yet
     const mcpConfigPath = path.join(this.workspaceRoot, 'mcp-servers.json');
     await this.mcpManager.loadConfig(mcpConfigPath);
-    await this.mcpManager.connectAll();
     
-    const mcpTools = await this.mcpManager.getAllTools();
-    if (mcpTools.length > 0) {
-      this.config.registry.registerAll(mcpTools);
-      this.config.logger?.logEvent('system', 'mcp_tools_registered', { count: mcpTools.length });
+    // Register tool names WITHOUT connecting — lazy connection on first use
+    const toolNames = this.mcpManager.getAvailableToolNames();
+    if (toolNames.length > 0) {
+      this.config.logger?.logEvent('system', 'mcp_tools_registered', { count: toolNames.length, tools: toolNames.slice(0, 10) });
     }
     
     this.mcpInitialized = true;
   }
 
   async run(task: string, existingState?: AgentState, onProgress?: OrchestratorUpdateCallback): Promise<{ state: AgentState; plan?: ExecutionPlan }> {
+    // MCP: only load config at start (cheap), connections happen on-demand
     await this.ensureMcpReady();
     const notify = (event: OrchestratorEvent) => this.notify(event, onProgress);
     let state = existingState ?? AgentStateMachine.create(`Orchestrate: ${task}`);
@@ -267,11 +274,30 @@ export class OrchestratorAgent {
     notify({ type: 'message_added', role: 'system', content: 'Iniciando fase de pesquisa...' });
     logger?.logEvent(state.id, 'phase_started', { phase: 'Research' });
     
+    // Pre-load RAG context before Research
+    let ragContext = '';
+    if (this.ragService) {
+      try {
+        const ragSpan = tracing?.startPhaseSpan('RAG Pre-load', orchestratorSpan);
+        await this.ragService.indexWorkspace('.');
+        ragContext = await this.ragService.getContextForPrompts(task, 2000, 0.05);
+        if (ragContext) {
+          notify({ type: 'message_added', role: 'system', content: `RAG: ${ragContext.length} chars de contexto relevante pré-carregado.` });
+          logger?.logEvent(state.id, 'rag_preloaded', { charsLoaded: ragContext.length });
+        }
+        ragSpan?.end();
+      } catch (err) {
+        logger?.logEvent(state.id, 'rag_preload_failed', { error: String(err) });
+      }
+    }
+    
     const researchSpan = tracing?.startPhaseSpan('Research', orchestratorSpan);
     let researchResult;
     let brief: ResearchBrief | null = null;
     try {
-        researchResult = await this.researchAgent.run(task, undefined, researchSpan);
+        // Inject RAG context into the research task
+        const enrichedTask = ragContext ? `${ragContext}\n\nTarefa original:\n${task}` : task;
+        researchResult = await this.researchAgent.run(enrichedTask, undefined, researchSpan);
         state = researchResult.state;
         brief = researchResult.brief;
 
@@ -364,6 +390,18 @@ export class OrchestratorAgent {
     logger?.logEvent(state.id, 'phase_started', { phase: 'Execution', streamCount: plan.streams.length });
     const executionSpan = tracing?.startPhaseSpan('Execution', orchestratorSpan);
 
+    // Git: create feature branch
+    const featureBranch = `agent/task-${state.id.slice(0, 8)}`;
+    let gitBranchCreated = false;
+    try {
+      execSync(`git checkout -b ${featureBranch}`, { cwd: this.workspaceRoot, stdio: 'pipe' });
+      gitBranchCreated = true;
+      notify({ type: 'message_added', role: 'system', content: `Branch criada: ${featureBranch}` });
+      logger?.logEvent(state.id, 'git_branch_created', { branch: featureBranch });
+    } catch {
+      // Not a git repo or git failed — continue without branching
+    }
+
     const streamResults = await this.executePlanStreams(state, plan, brief!, executionSpan, onProgress);
 
     const firstError = streamResults.find(
@@ -392,6 +430,18 @@ export class OrchestratorAgent {
     notify({ type: 'message_added', role: 'assistant', content: '=== TAREFA FINALIZADA ===' });
     notify({ type: 'phase_complete', phase: 'Finalized' });
     logger?.logEvent(state.id, 'orchestrator_completed', { status: 'success' });
+    
+    // Git: merge feature branch back (or commit directly if on feature branch)
+    if (gitBranchCreated) {
+      try {
+        execSync('git add -A && git commit -m "feat(agent): ' + task.slice(0, 40).replace(/"/g, '\\"') + '" || true', { cwd: this.workspaceRoot, stdio: 'pipe' });
+        execSync('git checkout main && git merge --no-ff ' + featureBranch + ' -m "merge: ' + featureBranch + '" || true', { cwd: this.workspaceRoot, stdio: 'pipe' });
+        notify({ type: 'message_added', role: 'system', content: `Branch ${featureBranch} merged em main.` });
+        logger?.logEvent(state.id, 'git_branch_merged', { branch: featureBranch });
+      } catch {
+        // Merge failed — leave branch as-is
+      }
+    }
     
     // Automação de Aprendizado: Registra a experiência bem-sucedida
     this.experienceManager.addExperience(task, state.id).catch(err => {
@@ -489,6 +539,7 @@ export class OrchestratorAgent {
       const workerRegistry = createDevelopmentToolRegistry({ workspaceRoot: workspaceDir });
       const workerAgent = new ReActAgent({
         ...this.liveConfig,
+        toolBudget: this.getBudgetForRole(stream.owner),
         onUpdate: (event) => {
             if (event.type === 'message_added') {
                 notify({ 
@@ -729,7 +780,13 @@ export class OrchestratorAgent {
       case 'tester':
       case 'test': return TESTER_PROMPT;
       case 'debug': return DEBUG_PROMPT;
+      case 'docs': return DOCS_PROMPT;
+      case 'migration': return MIGRATION_PROMPT;
       default: return `Você é um agente especializado em ${role}.`;
     }
+  }
+
+  private getBudgetForRole(role: string): Partial<ToolBudget> {
+    return DEFAULT_TOOL_BUDGETS[role.toLowerCase()] ?? DEFAULT_TOOL_BUDGETS.default;
   }
 }

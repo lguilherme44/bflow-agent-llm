@@ -16,13 +16,22 @@ export interface ContextConfig {
   summarizeThreshold: number;
 }
 
+/**
+ * ContextManager with intelligent compression.
+ *
+ * Key strategies:
+ * 1. Content-aware truncation — cuts at paragraph/sentence boundaries
+ * 2. Progressive summarization — rich structured summaries
+ * 3. Importance-based retention — keeps errors, decisions, approvals
+ * 4. Deduplication — skips repeated tool results
+ */
 export class ContextManager {
   private readonly config: ContextConfig;
 
   constructor(config?: Partial<ContextConfig>) {
     this.config = {
       maxMessages: 50,
-      maxTokensEstimate: 5_000, // Reduzido para chamadas mais rápidas na GPU
+      maxTokensEstimate: 5_000,
       summarizeThreshold: 15,
       ...config,
     };
@@ -33,34 +42,259 @@ export class ContextManager {
     let messages = this.ensureSystemAndTask([...state.messages], state, summary, systemPrompt);
 
     if (messages.length > this.config.maxMessages || this.estimateTokens(messages) > this.config.maxTokensEstimate) {
-      messages = this.compactOldMessages(messages, summary);
+      messages = this.smartCompact(messages, summary);
     }
 
-    messages = this.truncateMessages(messages);
+    messages = this.smartTruncate(messages);
+    messages = this.deduplicateToolResults(messages);
     messages = this.prioritizeToolResults(messages);
     return messages;
   }
 
-  private truncateMessages(messages: AgentMessage[]): AgentMessage[] {
-    // Limite por mensagem reduzido para evitar prompts gigantes e lentos na GPU
+  // ── Smart Truncation (content-aware) ────────────────────────
+
+  private smartTruncate(messages: AgentMessage[]): AgentMessage[] {
     const perMessageLimit = 2500;
-    
+
     return messages.map(msg => {
       const estimate = estimateTokensFromText(msg.content);
-      if (estimate <= perMessageLimit) {
-        return msg;
-      }
+      if (estimate <= perMessageLimit) return msg;
 
+      // Truncate at paragraph boundary
       const allowedChars = perMessageLimit * 4;
-      const truncatedContent = msg.content.slice(0, allowedChars) + 
-        `... [Conteúdo truncado: ${estimate} tokens -> ${perMessageLimit} tokens para economizar contexto]`;
+      const truncated = this.truncateAtBoundary(msg.content, allowedChars);
       
+      if (truncated.length >= msg.content.length - 50) return msg;
+
       return {
         ...msg,
-        content: truncatedContent
+        content: truncated + 
+          `\n[... ${estimate - perMessageLimit} tokens omitidos para economizar contexto]`,
       };
     });
   }
+
+  /** Truncate at the nearest sentence/paragraph boundary */
+  private truncateAtBoundary(text: string, maxChars: number): string {
+    if (text.length <= maxChars) return text;
+
+    const slice = text.slice(0, maxChars);
+
+    // Try to cut at paragraph break (double newline)
+    const lastParaBreak = slice.lastIndexOf('\n\n');
+    if (lastParaBreak > maxChars * 0.5) {
+      return slice.slice(0, lastParaBreak).trimEnd();
+    }
+
+    // Try to cut at sentence end (. ! ? followed by space or newline)
+    const sentenceEnds = [...slice.matchAll(/[.!?]\s+/g)];
+    if (sentenceEnds.length > 0) {
+      const lastSentence = sentenceEnds[sentenceEnds.length - 1];
+      if (lastSentence.index !== undefined && lastSentence.index > maxChars * 0.4) {
+        return slice.slice(0, lastSentence.index + 1).trimEnd();
+      }
+    }
+
+    // Fallback: cut at last newline
+    const lastNewline = slice.lastIndexOf('\n');
+    if (lastNewline > maxChars * 0.5) {
+      return slice.slice(0, lastNewline).trimEnd();
+    }
+
+    // Last resort: cut at last space
+    const lastSpace = slice.lastIndexOf(' ');
+    if (lastSpace > maxChars * 0.5) {
+      return slice.slice(0, lastSpace).trimEnd();
+    }
+
+    return slice;
+  }
+
+  // ── Smart Compaction (replaces compactOldMessages) ───────────
+
+  /**
+   * Intelligent compaction: preserves critical information and generates
+   * a rich structured summary that replaces most old messages.
+   */
+  private smartCompact(messages: AgentMessage[], summary: StructuredSummary): AgentMessage[] {
+    const systemMsgs = messages.filter(m => m.role === 'system').slice(0, 1);
+    const latestUser = messages.filter(m => m.role === 'user').slice(-1);
+
+    // Score messages by importance
+    const scored = messages
+      .filter(m => m.role !== 'system' && m.role !== 'user')
+      .map((m, i) => ({ msg: m, score: this.messageImportance(m, i, messages.length) }));
+
+    // Keep top N by importance (not just recency)
+    const topN = Math.min(this.config.maxMessages - 3, scored.length);
+    const kept = scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, topN)
+      .sort((a, b) => messages.indexOf(a.msg) - messages.indexOf(b.msg)); // Restore chronological
+
+    // Build rich summary message from discarded messages
+    const discarded = scored.filter(s => !kept.includes(s));
+    const compactSummary = this.buildCompactSummary(summary, discarded.map(d => d.msg));
+
+    return [
+      ...systemMsgs,
+      compactSummary,
+      ...latestUser,
+      ...kept.map(s => s.msg),
+    ];
+  }
+
+  /** Score a message by how important it is to keep */
+  private messageImportance(msg: AgentMessage, index: number, total: number): number {
+    let score = 0;
+
+    // Recency boost
+    score += (index / total) * 30;
+
+    // Assistant messages with tool calls are important
+    if (msg.role === 'assistant' && msg.toolCalls?.length) {
+      score += 25;
+    }
+
+    // Tool results with errors are critical
+    if (msg.role === 'tool' && msg.toolResult && !msg.toolResult.success) {
+      score += 40;
+    }
+
+    // Tool results with high attempt count
+    if (msg.role === 'tool' && msg.toolResult && msg.toolResult.attempts > 1) {
+      score += 15;
+    }
+
+    // System/tool messages with decisions or constraints in content
+    const content = msg.content.toLowerCase();
+    if (content.includes('decision') || content.includes('approve') || content.includes('reject')) {
+      score += 20;
+    }
+
+    // Short assistant messages (final responses) are important
+    if (msg.role === 'assistant' && estimateTokensFromText(msg.content) < 200) {
+      score += 10;
+    }
+
+    // Old, long, success-only tool results get low scores
+    if (msg.role === 'tool' && msg.toolResult?.success && index < total * 0.3) {
+      score -= 30;
+    }
+
+    return score;
+  }
+
+  /** Build a compact but informative summary from discarded messages */
+  private buildCompactSummary(summary: StructuredSummary, discarded: AgentMessage[]): AgentMessage {
+    const parts: string[] = [];
+
+    // Task context
+    if (summary.currentTask) {
+      parts.push(`## Tarefa: ${summary.currentTask}`);
+    }
+
+    // Key decisions
+    if (summary.decisions.length > 0) {
+      parts.push('## Decisões tomadas:');
+      for (const d of summary.decisions.slice(-6)) {
+        parts.push(`- ${d}`);
+      }
+    }
+
+    // Constraints
+    if (summary.constraints.length > 0) {
+      parts.push('## Restrições:');
+      for (const c of summary.constraints.slice(-4)) {
+        parts.push(`- ${c}`);
+      }
+    }
+
+    // Progress
+    if (summary.progress.length > 0) {
+      parts.push('## Progresso recente:');
+      for (const p of summary.progress.slice(-5)) {
+        parts.push(`- ${p}`);
+      }
+    }
+
+    // Errors
+    if (summary.errorsAndAttempts.length > 0) {
+      parts.push('## Erros encontrados:');
+      for (const e of summary.errorsAndAttempts.slice(-5)) {
+        parts.push(`- ${e}`);
+      }
+    }
+
+    // Relevant files
+    if (summary.relevantFiles.length > 0) {
+      parts.push('## Arquivos relevantes:');
+      for (const f of summary.relevantFiles.slice(0, 8)) {
+        parts.push(`- \`${f}\``);
+      }
+    }
+
+    // Next actions
+    if (summary.nextActions.length > 0) {
+      parts.push('## Próximas ações:');
+      for (const a of summary.nextActions.slice(0, 3)) {
+        parts.push(`- ${a}`);
+      }
+    }
+
+    // Extract tool summaries from discarded tool messages
+    const discardedTools = discarded.filter(m => m.role === 'tool' && m.toolResult?.success);
+    if (discardedTools.length > 0 && estimateTokensFromText(parts.join('\n')) < 800) {
+      const toolNames = [...new Set(discardedTools.map(m => {
+        // Try to extract tool name from content
+        const match = m.content.match(/Tool (\w+)|(\w+) result|result.*?(\w+)/i);
+        return match?.[1] || match?.[2] || match?.[3] || 'unknown';
+      }))];
+      parts.push(`## Ferramentas executadas (resumo): ${toolNames.join(', ')}`);
+    }
+
+    parts.push(`\n[Contexto compactado: ${discarded.length} mensagens resumidas. As mensagens mantidas contêm os detalhes críticos.]`);
+
+    return {
+      role: 'system',
+      content: parts.join('\n\n'),
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  // ── Deduplication ───────────────────────────────────────────
+
+  /**
+   * Remove consecutive duplicate tool results and repeated content.
+   */
+  private deduplicateToolResults(messages: AgentMessage[]): AgentMessage[] {
+    const seen = new Set<string>();
+    const result: AgentMessage[] = [];
+
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+
+      // For tool results, check if same content was already seen recently
+      if (msg.role === 'tool' && msg.toolResult?.success) {
+        const key = `${msg.toolResult.toolCallId}:${msg.content.slice(0, 100)}`;
+        if (seen.has(key)) {
+          // Replace with compact marker
+          result.push({
+            ...msg,
+            content: `[Resultado duplicado omitido — mesmo conteúdo já presente no contexto]`,
+          });
+          continue;
+        }
+        seen.add(key);
+      }
+
+      result.push(msg);
+    }
+
+    return result;
+  }
+
+  // ── Original methods (enhanced) ─────────────────────────────
 
   addFileContext(state: AgentState, filepath: string, content: string, reason?: string): AgentState {
     const now = new Date().toISOString();
@@ -187,6 +421,32 @@ export class ContextManager {
     };
   }
 
+  // ── Preserved: prioritizeToolResults (enhanced) ─────────────
+
+  private prioritizeToolResults(messages: AgentMessage[]): AgentMessage[] {
+    return messages.map((message, index) => {
+      if (message.role !== 'tool' || !message.toolResult) {
+        return message;
+      }
+
+      const isRecent = index >= messages.length - 10;
+      const isError = !message.toolResult.success;
+      if (isRecent || isError) {
+        return message;
+      }
+
+      // Compact successful old tool results with a one-liner
+      const toolName = message.toolResult.toolCallId || 'unknown';
+      const summary = message.content.slice(0, 120).replace(/\n/g, ' ');
+      return {
+        ...message,
+        content: `[Omitido: ${toolName} — ${summary}...]`,
+      };
+    });
+  }
+
+  // ── Preserved helper methods ────────────────────────────────
+
   private withContextItem(
     state: AgentState,
     kind: ContextItemKind,
@@ -213,44 +473,6 @@ export class ContextManager {
         items: [...state.context.items, item],
       },
     };
-  }
-
-  private compactOldMessages(messages: AgentMessage[], summary: StructuredSummary): AgentMessage[] {
-    const systemMessages = messages.filter((message) => message.role === 'system').slice(0, 1);
-    const latestUserMessages = messages.filter((message) => message.role === 'user').slice(-1);
-    const recentCount = Math.max(0, this.config.maxMessages - 3);
-    const recent = messages
-      .filter((message) => message.role !== 'system' && message.role !== 'user')
-      .slice(-recentCount);
-
-    const summaryMessage: AgentMessage = {
-      role: 'system',
-      content: `Context Summary:\n- Task: ${summary.currentTask}\n- Files: ${summary.relevantFiles.slice(0, 5).join(', ')}\n- Last Progress: ${summary.progress.slice(-3).join(', ')}`,
-      timestamp: new Date().toISOString(),
-    };
-
-    return [...systemMessages, summaryMessage, ...latestUserMessages, ...recent];
-  }
-
-  private prioritizeToolResults(messages: AgentMessage[]): AgentMessage[] {
-    return messages.map((message, index) => {
-      if (message.role !== 'tool' || !message.toolResult) {
-        return message;
-      }
-
-      const isRecent = index >= messages.length - 10;
-      const isError = !message.toolResult.success;
-      if (isRecent || isError) {
-        return message;
-      }
-
-      // Ideally we'd have the tool name in the message metadata.
-      
-      return {
-        ...message,
-        content: `[Omitido: Resultado da ferramenta (sucesso) para economizar contexto. Use a ferramenta novamente se precisar dos dados.]`,
-      };
-    });
   }
 
   private ensureSystemAndTask(
@@ -294,17 +516,11 @@ export class ContextManager {
 
   private scoreFile(previous: RelevantFileContext | undefined, reason: string | undefined, read: boolean): number {
     const base = previous?.score ?? 0;
-    
-    // Boost por razão (se houver palavras-chave da task)
+
     const reasonBoost = reason ? Math.min(reason.length / 5, 15) : 0;
-    
-    // Boost por acesso (leitura ou escrita)
     const accessBoost = read ? 8 : 15;
-    
-    // Penalidade por tempo (decrescimento suave)
     const decay = 0.95;
-    
-    // Centralidade: arquivos na raiz ou em pastas core ganham um pequeno boost passivo
+
     let centralityBoost = 0;
     if (previous?.filepath) {
       if (previous.filepath.includes('src/types') || previous.filepath.includes('src/index')) {
