@@ -13,6 +13,7 @@ import path from 'node:path';
 import picocolors from 'picocolors';
 import { loadEnv } from './utils/env.js';
 import { loadConfig } from './utils/config.js';
+import { runOpenAIAgent } from './agent/openai-agents/orchestrator.js';
 
 loadEnv();
 
@@ -157,6 +158,66 @@ program
     const { orchestrator } = await setupOrchestrator({ ...program.opts(), ...options });
     console.log(picocolors.cyan(`Executando tarefa: ${task}`));
     await orchestrator.run(task);
+  });
+
+program
+  .command('run-v2')
+  .description('Executa uma tarefa usando openai-agents-js (otimizado para 8GB VRAM)')
+  .argument('<task...>', 'Descricao da tarefa')
+  .option('-t, --max-turns <number>', 'Limite maximo de turns do agente (previne loops infinitos)', '15')
+  .action(async (taskArgs, cmdOptions) => {
+    const task = taskArgs.join(' ');
+    const config = loadConfig(process.cwd());
+    const providerName = program.opts().provider || config.provider || process.env.AGENT_LLM_PROVIDER || 'lmstudio';
+    
+    // Env vars têm prioridade sobre .agentrc
+    // Se provider não bate com a config, ignorar model/baseUrl da config
+    const configMatchesProvider = !config.provider || config.provider === providerName;
+    
+    let baseUrl = process.env.AGENT_LLM_BASE_URL || (configMatchesProvider ? config.baseUrl : '') || '';
+    if (!baseUrl) {
+      baseUrl = providerName === 'ollama' 
+        ? 'http://localhost:11434/v1' 
+        : 'http://localhost:1234/v1';
+    }
+    
+    const model = process.env.AGENT_LLM_MODEL 
+      || (configMatchesProvider ? config.model : '') 
+      || (providerName === 'ollama' ? 'qwen2.5-coder:7b' : 'local-model');
+    const maxTurns = parseInt(cmdOptions.maxTurns, 10) || 15;
+
+    console.log(picocolors.magenta(`\n🚀 openai-agents-js | ${providerName} | ${model} | maxTurns: ${maxTurns}\n`));
+    
+    try {
+      await runOpenAIAgent(task, {
+        workspaceRoot: process.cwd(),
+        baseUrl,
+        model,
+        maxTurns,
+        onUpdate: (update) => {
+          if (update.role === 'assistant') {
+            console.log(picocolors.green(`\nAgente > ${update.content}`));
+          } else if (update.role === 'system') {
+            console.log(picocolors.dim(`[sys] ${update.content}`));
+          }
+        },
+      });
+      
+      console.log(picocolors.magenta(`\n✅ Tarefa finalizada.\n`));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(picocolors.red(`\n❌ Erro: ${message}\n`));
+      
+      // Dicas específicas para erros comuns
+      if (message.includes('fetch failed') || message.includes('ECONNREFUSED')) {
+        console.error(picocolors.yellow(`💡 Verifique se o ${providerName} está rodando em ${baseUrl}`));
+      } else if (message.includes('400')) {
+        console.error(picocolors.yellow(`💡 O modelo pode não suportar tool calling. Tente um modelo compatível.`));
+      } else if (message.includes('MaxTurnsExceeded')) {
+        console.error(picocolors.yellow(`💡 O agente atingiu o limite de ${maxTurns} turns. Use --max-turns para aumentar.`));
+      }
+      process.exit(1);
+    }
   });
 
 program

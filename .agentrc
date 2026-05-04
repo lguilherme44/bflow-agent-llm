@@ -1,8 +1,8 @@
 {
-  "provider": "ollama",
-  "model": "qwen2.5-coder:latest",
-  "baseUrl": "http://localhot:1234/v1",
-  "temperature": 1,
-  "maxTokens": 16384,
+  "provider": "lmstudio",
+  "model": "qwen/qwen2.5-coder-7b-instruct",
+  "baseUrl": "http://localhost:8001/v1",
+  "temperature": 0.2,
+  "maxTokens": 8192,
   "sandbox": "auto"
 }

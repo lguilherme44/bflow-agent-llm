@@ -890,7 +890,7 @@ function isMissingFile(error: unknown): boolean {
   return typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT';
 }
 
-async function listFiles(workspaceRoot: string, directory: string, extensions?: string[]): Promise<string[]> {
+export async function listFiles(workspaceRoot: string, directory: string, extensions?: string[]): Promise<string[]> {
   const root = assertInsideWorkspace(workspaceRoot, directory);
   const output: string[] = [];
   const ignored = new Set(['node_modules', 'dist', '.git', '.agent', '.agent-checkpoints', 'build', 'out']);
@@ -919,7 +919,7 @@ async function listFiles(workspaceRoot: string, directory: string, extensions?: 
   return output.sort().slice(0, 500);
 }
 
-async function searchText(workspaceRoot: string, query: string, directory: string): Promise<Array<Record<string, JsonValue>>> {
+export async function searchText(workspaceRoot: string, query: string, directory: string): Promise<Array<Record<string, JsonValue>>> {
   const files = await listFiles(workspaceRoot, directory);
   const matches: Array<Record<string, JsonValue>> = [];
 

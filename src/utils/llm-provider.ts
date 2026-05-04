@@ -10,11 +10,12 @@ export interface LLMModel {
 }
 
 /**
- * Busca modelos disponíveis no Ollama local.
+ * Busca modelos disponíveis no Ollama local ou remoto.
  */
-export async function fetchOllamaModels(): Promise<LLMModel[]> {
+export async function fetchOllamaModels(baseUrl: string = 'http://localhost:11434'): Promise<LLMModel[]> {
   try {
-    const response = await fetch('http://localhost:11434/api/tags');
+    const url = baseUrl.endsWith('/') ? `${baseUrl}api/tags` : `${baseUrl}/api/tags`;
+    const response = await fetch(url);
     if (!response.ok) return [];
     
     const data = (await response.json()) as { models: any[] };
@@ -29,11 +30,12 @@ export async function fetchOllamaModels(): Promise<LLMModel[]> {
 }
 
 /**
- * Busca modelos disponíveis no LM Studio local.
+ * Busca modelos disponíveis no LM Studio local ou remoto.
  */
-export async function fetchLMStudioModels(): Promise<LLMModel[]> {
+export async function fetchLMStudioModels(baseUrl: string = 'http://localhost:1234/v1'): Promise<LLMModel[]> {
   try {
-    const response = await fetch('http://localhost:1234/v1/models');
+    const url = baseUrl.endsWith('/') ? `${baseUrl}models` : `${baseUrl}/models`;
+    const response = await fetch(url);
     if (!response.ok) return [];
     
     const data = (await response.json()) as { data: any[] };
@@ -48,11 +50,11 @@ export async function fetchLMStudioModels(): Promise<LLMModel[]> {
 
 /**
  * Inicia o download de um modelo no Ollama.
- * Nota: Ollama usa streaming para progresso, mas aqui simplificamos para aguardar ou apenas iniciar.
  */
-export async function pullOllamaModel(name: string): Promise<boolean> {
+export async function pullOllamaModel(name: string, baseUrl: string = 'http://localhost:11434'): Promise<boolean> {
   try {
-    const response = await fetch('http://localhost:11434/api/pull', {
+    const url = baseUrl.endsWith('/') ? `${baseUrl}api/pull` : `${baseUrl}/api/pull`;
+    const response = await fetch(url, {
       method: 'POST',
       body: JSON.stringify({ name, stream: false }),
     });
@@ -65,9 +67,10 @@ export async function pullOllamaModel(name: string): Promise<boolean> {
 /**
  * Inicia o download de um modelo no LM Studio.
  */
-export async function downloadLMStudioModel(name: string): Promise<boolean> {
+export async function downloadLMStudioModel(name: string, baseUrl: string = 'http://localhost:1234/v1'): Promise<boolean> {
   try {
-    const response = await fetch('http://localhost:1234/api/v1/models/download', {
+    const url = baseUrl.endsWith('/') ? `${baseUrl}models/download` : `${baseUrl}/models/download`;
+    const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: name }),

@@ -6,7 +6,7 @@ Este documento define as diretrizes e convenções que o agente deve seguir ao t
 
 ### Agente (bflow-agent-llm)
 - **Linguagem**: TypeScript (Strict Mode, NodeNext)
-- **Runtime**: Node.js 22+ (ESM)
+- **Runtime**: Node.js 18+ até 22 (ESM)
 - **LLMs**: GPT-4o, Claude 3.5 Sonnet, Ollama (local), LM Studio (local), OpenRouter
 - **AST/Parsing**: Tree-sitter, ast-grep, TypeScript Language Service
 - **Vector DB**: LanceDB (embedded, in-process)

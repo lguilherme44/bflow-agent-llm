@@ -34,7 +34,7 @@ BFlow é um agente de software fundamentado no ciclo **ReAct (Observe-Think-Act-
 ## 🚀 Como Iniciar
 
 ### Pré-requisitos
-- Node.js (v18+)
+- Node.js (v18+ até v22)
 - Ollama ou LM Studio (para execução local)
 
 ### Instalação

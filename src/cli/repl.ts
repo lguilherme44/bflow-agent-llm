@@ -88,15 +88,22 @@ export async function runRepl(
         return true;
       }
 
+      let baseUrl = '';
+      if (provider === 'ollama' || provider === 'lmstudio') {
+        const defaultUrl = provider === 'ollama' ? 'http://localhost:11434' : 'http://localhost:1234/v1';
+        baseUrl = await rl.question(`Base URL (padrão: ${defaultUrl}): `);
+        if (!baseUrl) baseUrl = defaultUrl;
+      }
+
       let model = '';
       let models: LLMModel[] = [];
 
       if (provider === 'ollama') {
-        console.log(picocolors.dim('Buscando modelos do Ollama...'));
-        models = await fetchOllamaModels();
+        console.log(picocolors.dim(`Buscando modelos do Ollama em ${baseUrl}...`));
+        models = await fetchOllamaModels(baseUrl);
       } else if (provider === 'lmstudio') {
-        console.log(picocolors.dim('Buscando modelos do LM Studio...'));
-        models = await fetchLMStudioModels();
+        console.log(picocolors.dim(`Buscando modelos do LM Studio em ${baseUrl}...`));
+        models = await fetchLMStudioModels(baseUrl);
       }
 
       if (models.length > 0) {
@@ -118,8 +125,8 @@ export async function runRepl(
           if (newModelName) {
             console.log(picocolors.yellow(`\nBaixando ${newModelName}... Isso pode demorar.`));
             const success = provider === 'ollama' 
-              ? await pullOllamaModel(newModelName) 
-              : await downloadLMStudioModel(newModelName);
+              ? await pullOllamaModel(newModelName, baseUrl) 
+              : await downloadLMStudioModel(newModelName, baseUrl);
             
             if (success) {
               console.log(picocolors.green('Download concluído!'));
@@ -134,15 +141,13 @@ export async function runRepl(
         }
       } else {
         if (provider === 'ollama' || provider === 'lmstudio') {
-          console.log(picocolors.yellow('Nenhum modelo detectado. Certifique-se que o provider está rodando.'));
+          console.log(picocolors.yellow('Nenhum modelo detectado. Certifique-se que o servidor está rodando na URL informada.'));
         }
         model = await rl.question('Modelo (deixe em branco para o padrão): ');
       }
 
-      let baseUrl = await rl.question('Base URL (deixe em branco para o padrão): ');
-      if (!baseUrl) {
-        if (provider === 'ollama') baseUrl = 'http://localhost:11434';
-        else if (provider === 'lmstudio') baseUrl = 'http://localhost:1234/v1';
+      if (!baseUrl && !['ollama', 'lmstudio'].includes(provider)) {
+        baseUrl = await rl.question('Base URL (deixe em branco para o padrão): ');
       }
       
       const newConfig: Partial<AgentConfig> = { provider };
