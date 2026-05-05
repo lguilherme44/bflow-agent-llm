@@ -15,6 +15,10 @@ const agentAPI = {
   // App info
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
 
+  // Agent execution
+  runAgent: (task: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('agent:run', task),
+  stopAgent: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('agent:stop'),
+
   // Agent events (Phase 1 — will add agent:run, agent:stop, agent:event)
   onAgentEvent: (callback: (event: unknown) => void): (() => void) => {
     const handler = (_event: Electron.IpcRendererEvent, data: unknown): void => callback(data)

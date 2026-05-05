@@ -13,6 +13,8 @@ const api = window.api ?? {
   saveConfig: async () => ({ success: true }),
   getWorkspace: async () => 'workspace',
   getVersion: async () => '1.0.0',
+  runAgent: async (task: string) => { console.log('Mock runAgent:', task); return { success: true }; },
+  stopAgent: async () => ({ success: true }),
   onAgentEvent: () => () => {}
 }
 
@@ -31,6 +33,32 @@ function App(): React.JSX.Element {
     api.getWorkspace().then(setWorkspace)
   }, [])
 
+  useEffect(() => {
+    // Setup event listener
+    const cleanup = api.onAgentEvent((event: any) => {
+      if (event.type === 'message' || event.type === 'complete' || event.type === 'error') {
+        const assistantMsg: Message = {
+          id: crypto.randomUUID(),
+          role: event.type === 'error' ? 'system' : 'assistant',
+          content: event.content,
+          timestamp: Date.now()
+        }
+        setMessages((prev) => [...prev, assistantMsg])
+        
+        if (event.type === 'complete' || event.type === 'error') {
+          setIsRunning(false)
+        }
+      } else if (event.type === 'thinking') {
+         // Could update some specific "thinking" state, but keeping it simple for MVP
+         console.log('Thinking:', event.content)
+      } else if (event.type === 'tool_call') {
+         console.log('Tool call:', event.content)
+      }
+    })
+
+    return cleanup
+  }, [])
+
   // Auto-scroll on new messages
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -45,7 +73,7 @@ function App(): React.JSX.Element {
   }, [])
 
   // Send message
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const text = input.trim()
     if (!text || isRunning) return
 
@@ -65,18 +93,22 @@ function App(): React.JSX.Element {
       inputRef.current.style.height = '24px'
     }
 
-    // TODO Phase 1: Actually call agent via IPC
-    // For now, simulate a response
-    setTimeout(() => {
-      const assistantMsg: Message = {
+    // Call agent via IPC
+    try {
+      const response = await api.runAgent(text)
+      if (!response.success) {
+        throw new Error(response.error || 'Failed to start agent')
+      }
+    } catch (error: any) {
+      const errorMsg: Message = {
         id: crypto.randomUUID(),
-        role: 'assistant',
-        content: `Recebi sua mensagem: "${text}"\n\n⚠️ O agente ainda não está conectado. Isso será implementado na Fase 1 (IPC Bridge + Agent Core).`,
+        role: 'system',
+        content: `Error: ${error.message}`,
         timestamp: Date.now()
       }
-      setMessages((prev) => [...prev, assistantMsg])
+      setMessages((prev) => [...prev, errorMsg])
       setIsRunning(false)
-    }, 800)
+    }
   }, [input, isRunning])
 
   // Handle Enter key (Shift+Enter for newline)

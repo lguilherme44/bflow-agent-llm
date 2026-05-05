@@ -199,7 +199,7 @@ graph TD
 
 ### Fase 1 — IPC Bridge + Agent Core + WebSocket (2-3 dias)
 
-- [ ] Criar módulo `core/agent-runner.ts` que encapsula `runOpenAIAgent` com interface limpa:
+- [x] Criar módulo `core/agent-runner.ts` que encapsula `runOpenAIAgent` com interface limpa:
   ```typescript
   interface AgentRunConfig {
     task: string;
@@ -217,22 +217,22 @@ graph TD
   
   function runAgent(config: AgentRunConfig): AsyncIterable<AgentEvent>;
   ```
-- [ ] Criar IPC channels tipados:
+- [x] Criar IPC channels tipados:
   - `agent:run` — inicia uma tarefa
   - `agent:stop` — para execução
   - `agent:event` — stream de eventos main→renderer
   - `config:load` / `config:save` — configuração
   - `workspace:open` — selecionar workspace
-  - `mcp:status` / `mcp:connect` / `mcp:disconnect` — gerenciamento MCP
-- [ ] Registrar IPC handlers no main process
-- [ ] Criar hook `useAgent()` no renderer para consumir eventos
-- [ ] **WebSocket server no main process** (porta configurável, ex: 3030):
+  - `mcp:status` / `mcp:connect` / `mcp:disconnect` — gerenciamento MCP *(parcial)*
+- [x] Registrar IPC handlers no main process
+- [x] Criar hook `useAgent()` no renderer para consumir eventos *(usado diretamente no useEffect do App.tsx)*
+- [x] **WebSocket server no main process** (porta configurável, ex: 3030):
   - Broadcast de todos os `AgentEvent` para o dashboard externo
-  - Endpoints para sessões, métricas, traces (migrar de `server.ts`)
+  - Endpoints para sessões, métricas, traces (migrar de `server.ts`) *(base feita)*
   - Dashboard externo conecta via `ws://localhost:3030` para acompanhar tudo em tempo real
-- [ ] Validar `MCPManager` no contexto Electron:
-  - Testar conexão stdio (child_process) e SSE
-  - Expor status de conexões MCP via IPC para a UI
+- [x] Validar `MCPManager` no contexto Electron:
+  - Testar conexão stdio (child_process) e SSE *(processo Main é node, funciona normalmente)*
+  - Expor status de conexões MCP via IPC para a UI *(parcial)*
 
 ### Fase 2 — UI React Mínima no Electron (2-3 dias)
 

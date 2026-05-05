@@ -5,6 +5,8 @@ interface AgentAPI {
   saveConfig: (config: Record<string, unknown>) => Promise<{ success: boolean }>
   getWorkspace: () => Promise<string>
   getVersion: () => Promise<string>
+  runAgent: (task: string) => Promise<{ success: boolean; error?: string }>
+  stopAgent: () => Promise<{ success: boolean; error?: string }>
   onAgentEvent: (callback: (event: unknown) => void) => () => void
 }
 
