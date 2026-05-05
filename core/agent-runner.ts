@@ -59,8 +59,10 @@ export class AgentRunner extends EventEmitter {
 
     // Run the agent in the background
     runOpenAIAgent(config.task, orchestratorConfig)
-      .then((result) => {
-        pushEvent({ type: 'complete', content: 'Task completed.', metadata: { result } });
+      .then((_result) => {
+        // Only send serializable summary — the full RunResult contains
+        // circular references that Electron IPC cannot serialize
+        pushEvent({ type: 'complete', content: 'Task completed.' });
       })
       .catch((error) => {
         pushEvent({ type: 'error', content: error.message || String(error) });

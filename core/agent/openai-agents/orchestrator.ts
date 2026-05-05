@@ -26,9 +26,13 @@ export interface OpenAIAgentConfig {
 const validateInputGuardrail: InputGuardrail = {
   name: 'validate_input',
   execute: async ({ input }) => {
-    const text = typeof input === 'string' ? input : JSON.stringify(input);
-    if (!text || text.trim().length < 3) {
-      return { tripwireTriggered: true, outputInfo: 'Tarefa muito curta ou vazia.' };
+    // ModelItem[] arrays are always valid (multi-turn conversation)
+    if (Array.isArray(input)) {
+      return { tripwireTriggered: false, outputInfo: 'OK' };
+    }
+    const text = typeof input === 'string' ? input.trim() : '';
+    if (!text) {
+      return { tripwireTriggered: true, outputInfo: 'Tarefa vazia. Descreva o que deseja fazer.' };
     }
     return { tripwireTriggered: false, outputInfo: 'OK' };
   },
