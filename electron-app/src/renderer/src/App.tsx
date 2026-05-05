@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react'
 import { ChatPanel } from './components/ChatPanel'
 import { SettingsPanel } from './components/SettingsPanel'
+import { ToolActivityPanel } from './components/ToolActivityPanel'
+import { useAgent } from './hooks/useAgent'
 
 // Safe API access — fallback when running outside Electron (e.g. browser preview)
 const api = window.api ?? {
@@ -17,6 +19,9 @@ function App(): React.JSX.Element {
   const [config, setConfig] = useState<Record<string, unknown>>({})
   const [workspace, setWorkspace] = useState('')
   const [showSettings, setShowSettings] = useState(false)
+  const [activeTab, setActiveTab] = useState<'tools' | 'mcp' | 'files'>('tools')
+
+  const { messages, toolCalls, isRunning, thinking, runAgent, stopAgent } = useAgent(api)
 
   // Load config and workspace on mount
   useEffect(() => {
@@ -50,12 +55,50 @@ function App(): React.JSX.Element {
         </div>
       </div>
 
-      {/* ── Main Content ──────────────────────────────────── */}
-      {showSettings ? (
-        <SettingsPanel onClose={() => setShowSettings(false)} api={api} />
-      ) : (
-        <ChatPanel api={api} />
-      )}
+      {/* ── Main Content Area ──────────────────────────────── */}
+      <div className="main-layout">
+        {showSettings ? (
+          <SettingsPanel onClose={() => setShowSettings(false)} api={api} />
+        ) : (
+          <>
+            <ChatPanel 
+              messages={messages} 
+              isRunning={isRunning} 
+              thinking={thinking}
+              onSend={runAgent} 
+              onStop={stopAgent} 
+            />
+            
+            <div className="sidebar">
+              <div className="sidebar__tabs">
+                <button 
+                  className={`sidebar__tab ${activeTab === 'tools' ? 'sidebar__tab--active' : ''}`}
+                  onClick={() => setActiveTab('tools')}
+                >
+                  Tools
+                </button>
+                <button 
+                  className={`sidebar__tab ${activeTab === 'mcp' ? 'sidebar__tab--active' : ''}`}
+                  onClick={() => setActiveTab('mcp')}
+                >
+                  MCP
+                </button>
+                <button 
+                  className={`sidebar__tab ${activeTab === 'files' ? 'sidebar__tab--active' : ''}`}
+                  onClick={() => setActiveTab('files')}
+                >
+                  Files
+                </button>
+              </div>
+              <div className="sidebar__content">
+                {activeTab === 'tools' && <ToolActivityPanel toolCalls={toolCalls} />}
+                {activeTab === 'mcp' && <div className="activity-panel__empty">MCP Panel (em breve)</div>}
+                {activeTab === 'files' && <div className="activity-panel__empty">File Explorer (em breve)</div>}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
 
       {/* ── Status Bar ────────────────────────────────────── */}
       <div className="statusbar">

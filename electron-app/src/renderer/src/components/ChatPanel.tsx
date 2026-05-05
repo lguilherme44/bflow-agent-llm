@@ -1,52 +1,24 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useRef, useEffect, useCallback, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-
-interface Message {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  timestamp: number
-}
+import { Message } from '../hooks/useAgent'
 
 interface ChatPanelProps {
-  api: any
+  messages: Message[]
+  isRunning: boolean
+  thinking: string | null
+  onSend: (text: string) => void
+  onStop: () => void
 }
 
-export function ChatPanel({ api }: ChatPanelProps): React.JSX.Element {
-  const [messages, setMessages] = useState<Message[]>([])
+export function ChatPanel({ messages, isRunning, thinking, onSend, onStop }: ChatPanelProps): React.JSX.Element {
   const [input, setInput] = useState('')
-  const [isRunning, setIsRunning] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   useEffect(() => {
-    const cleanup = api.onAgentEvent((event: any) => {
-      if (event.type === 'message' || event.type === 'complete' || event.type === 'error') {
-        const assistantMsg: Message = {
-          id: crypto.randomUUID(),
-          role: event.type === 'error' ? 'system' : 'assistant',
-          content: event.content,
-          timestamp: Date.now()
-        }
-        setMessages((prev) => [...prev, assistantMsg])
-        
-        if (event.type === 'complete' || event.type === 'error') {
-          setIsRunning(false)
-        }
-      } else if (event.type === 'thinking') {
-         console.log('Thinking:', event.content)
-      } else if (event.type === 'tool_call') {
-         console.log('Tool call:', event.content)
-      }
-    })
-
-    return cleanup
-  }, [api])
-
-  useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
+  }, [messages, thinking])
 
   const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setInput(e.target.value)
@@ -55,46 +27,17 @@ export function ChatPanel({ api }: ChatPanelProps): React.JSX.Element {
     el.style.height = Math.min(el.scrollHeight, 160) + 'px'
   }, [])
 
-  const handleSend = useCallback(async () => {
+  const handleSend = useCallback(() => {
     const text = input.trim()
     if (!text || isRunning) return
 
-    const userMsg: Message = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: text,
-      timestamp: Date.now()
-    }
-
-    setMessages((prev) => [...prev, userMsg])
+    onSend(text)
     setInput('')
-    setIsRunning(true)
 
     if (inputRef.current) {
       inputRef.current.style.height = '24px'
     }
-
-    try {
-      const response = await api.runAgent(text)
-      if (!response.success) {
-        throw new Error(response.error || 'Failed to start agent')
-      }
-    } catch (error: any) {
-      const errorMsg: Message = {
-        id: crypto.randomUUID(),
-        role: 'system',
-        content: `Error: ${error.message}`,
-        timestamp: Date.now()
-      }
-      setMessages((prev) => [...prev, errorMsg])
-      setIsRunning(false)
-    }
-  }, [input, isRunning, api])
-
-  const handleStop = useCallback(async () => {
-    await api.stopAgent();
-    setIsRunning(false);
-  }, [api]);
+  }, [input, isRunning, onSend])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -107,7 +50,7 @@ export function ChatPanel({ api }: ChatPanelProps): React.JSX.Element {
   )
 
   return (
-    <div className="main-content">
+    <div className="chat-container">
       <div className={`chat-messages${messages.length === 0 ? ' chat-messages--empty' : ''}`}>
         {messages.length === 0 ? (
           <div className="chat-welcome">
@@ -140,7 +83,17 @@ export function ChatPanel({ api }: ChatPanelProps): React.JSX.Element {
             </div>
           ))
         )}
-        {isRunning && (
+        
+        {thinking && (
+          <div className="message message--assistant message--thinking">
+            <div className="message__avatar">⬡</div>
+            <div className="message__content">
+              <em>{thinking}</em>
+            </div>
+          </div>
+        )}
+
+        {isRunning && !thinking && (
           <div className="message message--assistant">
             <div className="message__avatar">⬡</div>
             <div className="message__content">
@@ -166,7 +119,7 @@ export function ChatPanel({ api }: ChatPanelProps): React.JSX.Element {
           {isRunning ? (
             <button
               className="chat-input__send chat-input__send--stop"
-              onClick={handleStop}
+              onClick={onStop}
               title="Parar Execução"
             >
               ◼

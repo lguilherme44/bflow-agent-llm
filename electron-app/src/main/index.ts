@@ -70,6 +70,13 @@ function setupIpcHandlers() {
     return app.getVersion();
   });
 
+  ipcMain.handle('mcp:status', async () => {
+    // For MVP just return some mock data or actual manager status if instantiated
+    // Since we don't have a global manager instance here without AgentRunner, 
+    // let's return an empty array for now until MCPManager is hoisted.
+    return { servers: [] };
+  });
+
   // Agent IPC handlers
   ipcMain.handle('agent:run', async (_event, task: string) => {
     if (agentRunner) {

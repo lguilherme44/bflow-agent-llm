@@ -243,9 +243,9 @@ graph TD
 - [x] **Status Bar**: modelo ativo, tokens consumidos, workspace selecionado, status MCP
 
 **Iteração posterior (Fase 2.5 — após MVP rodar)**:
-- [ ] **Tool Activity**: painel lateral mostrando tool calls em tempo real
+- [x] **Tool Activity**: painel lateral mostrando tool calls em tempo real
 - [ ] **Diff Viewer**: visualização de mudanças de código (usar `react-diff-viewer` ou Monaco)
-- [ ] **MCP Panel**: status de conexões MCP, conectar/desconectar servers
+- [x] **MCP Panel**: status de conexões MCP, conectar/desconectar servers (layout via UI, falta aprofundar lógica core)
 - [ ] **File Explorer**: mini-explorer do workspace com arquivos tocados pelo agente
 
 > [!TIP]
