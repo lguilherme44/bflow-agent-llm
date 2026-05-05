@@ -13,14 +13,14 @@ const api = window.api ?? {
   getWorkspace: async () => 'workspace',
   getVersion: async () => '1.0.0',
   getMcpStatus: async () => ({ servers: [] }),
-  syncModels: async (baseUrl: string) => ({ success: true, models: ['mock-model'] }),
+  syncModels: async (_baseUrl: string) => ({ success: true, models: ['mock-model'] }),
   runAgent: async (task: string) => { console.log('Mock runAgent:', task); return { success: true }; },
   stopAgent: async () => ({ success: true }),
   onAgentEvent: () => () => {}
 }
 
 function App(): React.JSX.Element {
-  const [config, setConfig] = useState<Record<string, unknown>>({})
+  const [config, setConfig] = useState<any>({})
   const [workspace, setWorkspace] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [activeTab, setActiveTab] = useState<'tools' | 'mcp' | 'files'>('tools')

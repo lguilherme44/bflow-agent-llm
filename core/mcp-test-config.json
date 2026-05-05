@@ -1,0 +1,1 @@
+{"mcpServers":{"mock":{"command":"npx","args":["tsx","src/tests/mock-mcp-server.ts"]}}}

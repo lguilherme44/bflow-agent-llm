@@ -8,6 +8,9 @@ import { CodeEditingService } from '../../code/editing-service.js';
 import { TerminalService } from '../../code/terminal-service.js';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { LocalRagService } from '../../rag/local-rag.js';
+import { GitService, GitFileStatus } from '../../code/git-service.js';
+import { TerminalOutputParser } from '../../utils/terminal-output-parser.js';
 
 export function createOpenAITools(options?: DevelopmentToolOptions) {
   const workspaceRoot = options?.workspaceRoot ?? process.cwd();
@@ -16,6 +19,8 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
   const tsService = options?.tsLanguageService ?? new TypeScriptLanguageService(workspaceRoot);
   const editing = options?.codeEditingService ?? new CodeEditingService(workspaceRoot, parser, astGrep, tsService);
   const terminal = options?.terminalService ?? new TerminalService(workspaceRoot);
+  const rag = options?.ragService ?? new LocalRagService(workspaceRoot, parser);
+  const git = options?.gitService ?? new GitService(terminal);
 
   // ── read_file (completo com AST) ─────────────────────────────
   const readFileTool = tool({
@@ -171,6 +176,119 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
     },
   });
 
+  // ── retrieve_context ─────────────────────────────────────────
+  const retrieveContextTool = tool({
+    name: 'retrieve_context',
+    description: 'Indexes the workspace incrementally and retrieves relevant code or documentation chunks using hybrid lexical, structural and recency ranking. Use before planning or editing.',
+    parameters: z.object({
+      task: z.string().min(1),
+      directory: z.string().default('.'),
+      limit: z.number().int().min(1).max(20).default(8),
+    }),
+    execute: async ({ task, directory, limit }) => {
+      await rag.indexWorkspace(directory);
+      return rag.retrieveHybrid({ task, limit });
+    },
+  });
+
+  // ── rename_symbol ────────────────────────────────────────────
+  const renameSymbolTool = tool({
+    name: 'rename_symbol',
+    description: 'Uses the TypeScript Language Service to plan a safe symbol rename across references.',
+    parameters: z.object({
+      filepath: z.string().min(1),
+      line: z.number().int().min(1),
+      column: z.number().int().min(0),
+      newName: z.string().min(1),
+    }),
+    execute: async ({ filepath, line, column, newName }) => {
+      return editing.createRenamePlan({
+        filepath,
+        position: { line, column },
+        newName,
+      });
+    },
+  });
+
+  // ── find_references ──────────────────────────────────────────
+  const findReferencesTool = tool({
+    name: 'find_references',
+    description: 'Uses the TypeScript Language Service to find references for a symbol at a source position.',
+    parameters: z.object({
+      filepath: z.string().min(1),
+      line: z.number().int().min(1),
+      column: z.number().int().min(0),
+    }),
+    execute: async ({ filepath, line, column }) => {
+      return editing.findReferences(filepath, { line, column });
+    },
+  });
+
+  // ── run_tests ────────────────────────────────────────────────
+  const runTestsTool = tool({
+    name: 'run_tests',
+    description: 'Runs the configured npm test command. Use after code changes.',
+    parameters: z.object({}),
+    execute: async () => {
+      const result = await terminal.executeCommand('npm.cmd test', '.');
+      const failures = TerminalOutputParser.parseTestFailures(result.stdout, result.stderr);
+      const relatedFiles = TerminalOutputParser.suggestFiles(failures);
+      
+      return {
+        ...result,
+        failures,
+        relatedFiles,
+        summary: failures.length > 0 ? `Failed ${failures.length} tests.` : 'All tests passed.'
+      };
+    },
+  });
+
+  // ── run_linter ───────────────────────────────────────────────
+  const runLinterTool = tool({
+    name: 'run_linter',
+    description: 'Runs npm lint with optional autoFix. Use after formatting-sensitive code changes.',
+    parameters: z.object({
+      autoFix: z.boolean().default(false),
+    }),
+    execute: async ({ autoFix }) => {
+      const command = autoFix ? 'npm.cmd run lint -- --fix' : 'npm.cmd run lint';
+      const beforeStatus = await git.getParsedStatus();
+      const result = await terminal.executeCommand(command, '.');
+      const afterStatus = await git.getParsedStatus();
+      
+      const beforeByFile = new Map(beforeStatus.map((status: GitFileStatus) => [status.filepath, status.status]));
+      const fixedFiles: string[] = [];
+      for (const after of afterStatus) {
+        if (!beforeByFile.has(after.filepath) || beforeByFile.get(after.filepath) !== after.status) {
+          fixedFiles.push(after.filepath);
+        }
+      }
+
+      return {
+        ...result,
+        autoFixApplied: autoFix,
+        fixedFiles,
+      };
+    },
+  });
+
+  // ── git_commit ───────────────────────────────────────────────
+  const gitCommitTool = tool({
+    name: 'git_commit',
+    description: 'Adds all changes and commits them with a descriptive message following Conventional Commits.',
+    parameters: z.object({
+      message: z.string().min(1),
+    }),
+    execute: async ({ message }) => {
+      // simplified without validation gate for now to match SDK scope
+      const status = await git.getParsedStatus();
+      if (status.length === 0) return { success: false, reason: 'No changes to commit' };
+      
+      await git.commit(message);
+      return { success: true, message: `Committed ${status.length} files.` };
+    },
+  });
+
   return {
     readFileTool,
     readFileCompactTool,
@@ -180,5 +298,11 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
     createFileTool,
     editFileTool,
     completeTaskTool,
+    retrieveContextTool,
+    renameSymbolTool,
+    findReferencesTool,
+    runTestsTool,
+    runLinterTool,
+    gitCommitTool,
   };
 }

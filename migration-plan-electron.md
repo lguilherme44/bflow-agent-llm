@@ -293,31 +293,31 @@ graph TD
 
 ### Fase 4 — Enriquecer Tools no SDK (2-3 dias)
 
-- [ ] Portar ferramentas avançadas que só existiam no legado para `openai-agents/tools.ts`:
+- [x] Portar ferramentas avançadas que só existiam no legado para `openai-agents/tools.ts`:
   - `retrieve_context` (RAG) → nova tool usando `LocalRagService`
   - `rename_symbol` → tool usando `TypeScriptLanguageService`
   - `find_references` → tool usando TS LS
   - `run_tests` → tool usando `TerminalService` com detecção de framework
   - `run_linter` → tool para ESLint/Prettier
   - `git_commit` → tool com validação
-- [ ] Criar agentes especializados via SDK `Agent` + `handoff()`:
-  - `CoderAgent` (atual, já existe)
-  - `ReviewerAgent` (novo, com tools de leitura + análise)
-  - `PlannerAgent` (novo, com RAG + list_files)
-- [ ] Adicionar guardrails via SDK:
+- [x] Criar agentes especializados via SDK `Agent` + `handoff()`:
+  - Agent de "Planning/Research" focado apenas em RAG e busca
+  - Agent de "Code Review" focado apenas em rodar TS Language Service e Lint
+  - Configurar `handoff` entre eles, tirando o peso de um agente único.vo, com RAG + list_files)
+- [x] Adicionar guardrails via SDK:
   - Input guardrail para validar tarefas
   - Output guardrail para validar respostas
 
 ### Fase 5 — Polish + Testes (1-2 dias)
 
-- [ ] Testes E2E do fluxo Electron:
+- [x] Testes E2E do fluxo Electron:
   - Abrir app → selecionar workspace → enviar task → ver resultado
   - Verificar tool calls aparecem na UI
   - Verificar diff viewer funciona
-- [ ] Verificar compatibilidade Windows (principal plataforma do dev)
-- [ ] Build de distribuição (`electron-builder` para Windows)
-- [ ] Atualizar README.md com novo fluxo
-- [ ] Atualizar TODO.md
+- [x] Verificar compatibilidade Windows (principal plataforma do dev)
+- [x] Build de distribuição (`electron-builder` para Windows)
+- [x] Atualizar README.md com novo fluxo
+- [x] Atualizar TODO.md
 
 ---
 

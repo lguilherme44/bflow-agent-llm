@@ -1,0 +1,1 @@
+{"timestamp":"2026-05-05T00:56:49.529Z","type":"event","agentId":"system","payload":{"event":"mcp_config_missing","message":"Nenhum arquivo mcp-servers.json encontrado. Pulando MCP."}}

@@ -18,10 +18,11 @@ export function createSwarmAgents(workspaceRoot: string) {
       'Você é um engenheiro de software. Responda em PT-BR.',
       'REGRAS:',
       '1. SEMPRE use ferramentas para responder. NUNCA responda só com texto.',
-      '2. Para explorar: use list_files, read_file_compact, search_text.',
-      '3. Para editar: use edit_file ou create_file.',
-      '4. Após editar, valide com execute_command (npm run build).',
-      '5. Ao terminar, use complete_task com resumo em PT-BR.',
+      '2. Para explorar: use list_files, read_file_compact, search_text, retrieve_context.',
+      '3. Para editar: use edit_file, create_file, rename_symbol.',
+      '4. Após editar, valide com run_tests e run_linter.',
+      '5. Ao terminar uma tarefa completa, faça commit com git_commit.',
+      '6. Finalize o fluxo usando complete_task com resumo em PT-BR.',
     ].join('\n'),
     tools: [
       tools.readFileTool,
@@ -32,6 +33,12 @@ export function createSwarmAgents(workspaceRoot: string) {
       tools.createFileTool,
       tools.editFileTool,
       tools.completeTaskTool,
+      tools.retrieveContextTool,
+      tools.renameSymbolTool,
+      tools.findReferencesTool,
+      tools.runTestsTool,
+      tools.runLinterTool,
+      tools.gitCommitTool,
     ],
     // Modelo local: forçar temperature baixa e resposta curta
     modelSettings: {
@@ -40,7 +47,7 @@ export function createSwarmAgents(workspaceRoot: string) {
     },
   });
 
-  // O plannerAgent agora é o mesmo coderAgent (sem overhead de handoff)
+  // O plannerAgent e reviewerAgent agora são o mesmo coderAgent (sem overhead de handoff)
   // Mantemos a interface para compatibilidade com o orchestrator
-  return { plannerAgent: coderAgent, coderAgent };
+  return { plannerAgent: coderAgent, coderAgent, reviewerAgent: coderAgent };
 }

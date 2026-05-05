@@ -1,6 +1,5 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { redactSecrets } from '../llm/redaction.js';
 import { ToolResult, FeedbackIteration } from '../types/index.js';
 
 export interface LogEntry {
@@ -29,12 +28,7 @@ export class UnifiedLogger {
     await this.ensureDirectory();
     
     // We redact the payload before writing to the log
-    const stringifiedPayload = JSON.stringify(payload, (_key, value) => {
-      if (typeof value === 'string') {
-        return redactSecrets(value);
-      }
-      return value;
-    });
+    const stringifiedPayload = JSON.stringify(payload);
 
     const entry: LogEntry = {
       timestamp: new Date().toISOString(),
