@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { ChatPanel } from './components/ChatPanel'
 import { SettingsPanel } from './components/SettingsPanel'
 import { ToolActivityPanel } from './components/ToolActivityPanel'
+import { FileExplorerPanel } from './components/FileExplorerPanel'
+import { McpPanel } from './components/McpPanel'
 import { useAgent } from './hooks/useAgent'
 
 // Safe API access — fallback when running outside Electron (e.g. browser preview)
@@ -10,6 +12,8 @@ const api = window.api ?? {
   saveConfig: async () => ({ success: true }),
   getWorkspace: async () => 'workspace',
   getVersion: async () => '1.0.0',
+  getMcpStatus: async () => ({ servers: [] }),
+  syncModels: async (baseUrl: string) => ({ success: true, models: ['mock-model'] }),
   runAgent: async (task: string) => { console.log('Mock runAgent:', task); return { success: true }; },
   stopAgent: async () => ({ success: true }),
   onAgentEvent: () => () => {}
@@ -20,6 +24,7 @@ function App(): React.JSX.Element {
   const [workspace, setWorkspace] = useState('')
   const [showSettings, setShowSettings] = useState(false)
   const [activeTab, setActiveTab] = useState<'tools' | 'mcp' | 'files'>('tools')
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
   const { messages, toolCalls, isRunning, thinking, runAgent, stopAgent } = useAgent(api)
 
@@ -43,6 +48,19 @@ function App(): React.JSX.Element {
           <span className="titlebar__label">agent</span>
         </div>
         <div className="titlebar__status">
+          {!showSettings && (
+            <button 
+              className={`titlebar__settings-btn ${isSidebarOpen ? 'titlebar__settings-btn--active' : ''}`}
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              title="Alternar Painel Lateral"
+              style={{ fontSize: '1rem', marginRight: '8px' }}
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="15" y1="3" x2="15" y2="21"></line>
+              </svg>
+            </button>
+          )}
           <button 
             className="titlebar__settings-btn" 
             onClick={() => setShowSettings(true)}
@@ -69,7 +87,7 @@ function App(): React.JSX.Element {
               onStop={stopAgent} 
             />
             
-            <div className="sidebar">
+            <div className={`sidebar ${!isSidebarOpen ? 'sidebar--closed' : ''}`}>
               <div className="sidebar__tabs">
                 <button 
                   className={`sidebar__tab ${activeTab === 'tools' ? 'sidebar__tab--active' : ''}`}
@@ -92,8 +110,8 @@ function App(): React.JSX.Element {
               </div>
               <div className="sidebar__content">
                 {activeTab === 'tools' && <ToolActivityPanel toolCalls={toolCalls} />}
-                {activeTab === 'mcp' && <div className="activity-panel__empty">MCP Panel (em breve)</div>}
-                {activeTab === 'files' && <div className="activity-panel__empty">File Explorer (em breve)</div>}
+                {activeTab === 'mcp' && <McpPanel api={api} />}
+                {activeTab === 'files' && <FileExplorerPanel toolCalls={toolCalls} />}
               </div>
             </div>
           </>

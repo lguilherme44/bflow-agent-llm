@@ -8,6 +8,8 @@ interface SettingsPanelProps {
 export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.Element {
   const [config, setConfig] = useState<Record<string, unknown>>({})
   const [loading, setLoading] = useState(true)
+  const [models, setModels] = useState<string[]>([])
+  const [syncing, setSyncing] = useState(false)
 
   useEffect(() => {
     api.loadConfig().then((data: any) => {
@@ -23,6 +25,27 @@ export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.E
   const handleSave = async () => {
     await api.saveConfig(config)
     onClose()
+  }
+
+  const handleSyncModels = async () => {
+    if (!config.baseUrl) return
+    setSyncing(true)
+    try {
+      const result = await api.syncModels(config.baseUrl as string)
+      if (result.success && result.models) {
+        setModels(result.models)
+        if (result.models.length > 0 && !config.model) {
+          handleChange('model', result.models[0])
+        }
+        alert(`Sincronizado! ${result.models.length} modelos encontrados. Clique no campo "Modelo" para visualizar e escolher.`)
+      } else {
+        alert(`Erro ao sincronizar: ${result.error}`)
+      }
+    } catch (err: any) {
+      alert(`Erro inesperado: ${err.message}`)
+    } finally {
+      setSyncing(false)
+    }
   }
 
   if (loading) {
@@ -53,13 +76,29 @@ export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.E
 
         <div className="form-group">
           <label>Modelo</label>
-          <input 
-            type="text" 
-            value={config.model as string || ''} 
-            onChange={(e) => handleChange('model', e.target.value)}
-            className="form-control"
-            placeholder="Ex: local-model, gpt-4o, claude-3-5-sonnet-20240620"
-          />
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <input 
+              type="text" 
+              value={config.model as string || ''} 
+              onChange={(e) => handleChange('model', e.target.value)}
+              className="form-control"
+              placeholder="Ex: local-model, gpt-4o"
+              list="available-models"
+            />
+            {(config.provider === 'lmstudio' || config.provider === 'ollama') && (
+              <button 
+                className="btn btn-secondary" 
+                onClick={handleSyncModels}
+                disabled={syncing}
+                style={{ whiteSpace: 'nowrap' }}
+              >
+                {syncing ? 'Sincronizando...' : '🔄 Sincronizar'}
+              </button>
+            )}
+          </div>
+          <datalist id="available-models">
+            {models.map(m => <option key={m} value={m} />)}
+          </datalist>
         </div>
 
         <div className="form-group">

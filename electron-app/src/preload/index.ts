@@ -14,6 +14,9 @@ const agentAPI = {
 
   // App info
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
+  getMcpStatus: (): Promise<any> => ipcRenderer.invoke('mcp:status'),
+  syncModels: (baseUrl: string): Promise<{ success: boolean; models?: string[]; error?: string }> => 
+    ipcRenderer.invoke('models:sync', baseUrl),
 
   // Agent execution
   runAgent: (task: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('agent:run', task),

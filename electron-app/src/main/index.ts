@@ -6,19 +6,52 @@ import { WebSocketServer } from 'ws';
 import { AgentRunner, AgentRunConfig, AgentEvent } from '@bflow/core';
 import icon from '../../resources/icon.png?asset';
 
+import fs from 'fs';
+
 let mainWindow: BrowserWindow | null = null;
 let agentRunner: any | null = null;
 let wss: WebSocketServer | null = null;
 
-// Store config in memory for now
-let appConfig: Record<string, unknown> = {
+let currentWorkspace = process.cwd();
+
+// Store config in file
+const getConfigPath = () => join(app.getPath('userData'), 'bflow-agent-config.json');
+
+const defaultConfig: Record<string, unknown> = {
   provider: 'lmstudio',
   model: 'local-model',
   baseUrl: 'http://localhost:1234/v1',
   maxTurns: 15
 };
 
-let currentWorkspace = process.cwd();
+let appConfig = { ...defaultConfig };
+
+function loadConfig() {
+  try {
+    const p = getConfigPath();
+    if (fs.existsSync(p)) {
+      const data = fs.readFileSync(p, 'utf-8');
+      appConfig = { ...defaultConfig, ...JSON.parse(data) };
+    }
+  } catch (err) {
+    console.error('[IPC] Failed to load config:', err);
+  }
+}
+
+function saveConfig(config: Record<string, unknown>) {
+  try {
+    appConfig = { ...appConfig, ...config };
+    fs.writeFileSync(getConfigPath(), JSON.stringify(appConfig, null, 2), 'utf-8');
+    console.log('[IPC] Config saved:', appConfig);
+  } catch (err) {
+    console.error('[IPC] Failed to save config:', err);
+  }
+}
+
+// Initialize config on startup
+app.whenReady().then(() => {
+  loadConfig();
+});
 
 function setupWebSocketServer() {
   wss = new WebSocketServer({ port: 3030 });
@@ -57,8 +90,7 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle('config:save', async (_event, config: Record<string, unknown>) => {
-    appConfig = { ...appConfig, ...config };
-    console.log('[IPC] Config saved:', appConfig);
+    saveConfig(config);
     return { success: true };
   });
 
@@ -71,10 +103,20 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle('mcp:status', async () => {
-    // For MVP just return some mock data or actual manager status if instantiated
-    // Since we don't have a global manager instance here without AgentRunner, 
-    // let's return an empty array for now until MCPManager is hoisted.
     return { servers: [] };
+  });
+
+  ipcMain.handle('models:sync', async (_event, baseUrl: string) => {
+    try {
+      // Standard OpenAI endpoint for listing models
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/models`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const data = await response.json();
+      return { success: true, models: data.data.map((m: any) => m.id) };
+    } catch (err: any) {
+      console.error('[IPC] Failed to sync models:', err.message);
+      return { success: false, error: err.message };
+    }
   });
 
   // Agent IPC handlers
