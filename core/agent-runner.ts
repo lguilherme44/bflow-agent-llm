@@ -6,6 +6,7 @@ export interface AgentRunConfig {
   workspaceRoot: string;
   model: string;
   baseUrl: string;
+  apiKey?: string;
   maxTurns: number;
 }
 
@@ -42,6 +43,7 @@ export class AgentRunner extends EventEmitter {
     const orchestratorConfig: OpenAIAgentConfig = {
       workspaceRoot: config.workspaceRoot,
       baseUrl: config.baseUrl,
+      apiKey: config.apiKey,
       model: config.model,
       maxTurns: config.maxTurns,
       onUpdate: (update) => {

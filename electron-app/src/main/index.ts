@@ -3,7 +3,6 @@ import { join } from 'path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { WebSocketServer } from 'ws';
 import { AgentRunner } from '@bflow/core';
-import type { AgentEvent } from '@bflow/core';
 import icon from '../../resources/icon.png?asset';
 
 import fs from 'fs';
@@ -21,6 +20,7 @@ const defaultConfig: Record<string, unknown> = {
   provider: 'lmstudio',
   model: 'local-model',
   baseUrl: 'http://localhost:1234/v1',
+  apiKey: '',
   maxTurns: 15
 };
 
@@ -106,10 +106,17 @@ function setupIpcHandlers() {
     return { servers: [] };
   });
 
-  ipcMain.handle('models:sync', async (_event, baseUrl: string) => {
+  ipcMain.handle('models:sync', async (_event, baseUrl: string, apiKey?: string) => {
     try {
-      // Standard OpenAI endpoint for listing models
-      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/models`);
+      // Build headers — include Authorization if an API key is provided
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      const key = apiKey || (appConfig.apiKey as string);
+      if (key) {
+        headers['Authorization'] = `Bearer ${key}`;
+      }
+
+      // Standard OpenAI-compatible endpoint for listing models
+      const response = await fetch(`${baseUrl.replace(/\/$/, '')}/models`, { headers });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const data = await response.json();
       return { success: true, models: data.data.map((m: any) => m.id) };
@@ -133,6 +140,7 @@ function setupIpcHandlers() {
         workspaceRoot: currentWorkspace,
         model: appConfig.model as string,
         baseUrl: appConfig.baseUrl as string,
+        apiKey: (appConfig.apiKey as string) || undefined,
         maxTurns: appConfig.maxTurns as number
       };
 

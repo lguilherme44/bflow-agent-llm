@@ -19,7 +19,23 @@ export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.E
   }, [api])
 
   const handleChange = (key: string, value: string | number) => {
-    setConfig((prev) => ({ ...prev, [key]: value }))
+    setConfig((prev) => {
+      const next = { ...prev, [key]: value }
+      // Auto-set default baseUrl when switching providers
+      if (key === 'provider') {
+        const defaults: Record<string, string> = {
+          lmstudio: 'http://localhost:1234/v1',
+          ollama: 'http://localhost:11434/v1',
+          omlx: 'http://localhost:8000/v1',
+          openai: 'https://api.openai.com/v1',
+          anthropic: 'https://api.anthropic.com/v1',
+        }
+        if (defaults[value as string]) {
+          next.baseUrl = defaults[value as string]
+        }
+      }
+      return next
+    })
   }
 
   const handleSave = async () => {
@@ -31,13 +47,19 @@ export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.E
     if (!config.baseUrl) return
     setSyncing(true)
     try {
-      const result = await api.syncModels(config.baseUrl as string)
+      const result = await api.syncModels(
+        config.baseUrl as string,
+        (config.apiKey as string) || undefined
+      )
       if (result.success && result.models) {
         setModels(result.models)
-        if (result.models.length > 0 && !config.model) {
-          handleChange('model', result.models[0])
+        if (result.models.length > 0) {
+          // Auto-select first model if none selected or current not in list
+          const current = config.model as string
+          if (!current || !result.models.includes(current)) {
+            handleChange('model', result.models[0])
+          }
         }
-        alert(`Sincronizado! ${result.models.length} modelos encontrados. Clique no campo "Modelo" para visualizar e escolher.`)
       } else {
         alert(`Erro ao sincronizar: ${result.error}`)
       }
@@ -47,6 +69,9 @@ export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.E
       setSyncing(false)
     }
   }
+
+  // Determine if we should show the model dropdown (local providers with sync)
+  const isLocalProvider = config.provider === 'lmstudio' || config.provider === 'ollama' || config.provider === 'omlx'
 
   if (loading) {
     return <div className="settings-panel"><span className="spinner" /></div>
@@ -69,6 +94,7 @@ export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.E
           >
             <option value="lmstudio">LM Studio (Local)</option>
             <option value="ollama">Ollama (Local)</option>
+            <option value="omlx">oMLX (Apple Silicon)</option>
             <option value="openai">OpenAI</option>
             <option value="anthropic">Anthropic</option>
           </select>
@@ -76,29 +102,42 @@ export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.E
 
         <div className="form-group">
           <label>Modelo</label>
-          <div style={{ display: 'flex', gap: '8px' }}>
+          {isLocalProvider && (
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+              <button 
+                className="btn btn-secondary" 
+                onClick={handleSyncModels}
+                disabled={syncing}
+                style={{ whiteSpace: 'nowrap', flex: 'none' }}
+              >
+                {syncing ? '⏳ Sincronizando...' : '🔄 Sincronizar Modelos'}
+              </button>
+              {models.length > 0 && (
+                <span style={{ color: 'var(--color-text-muted)', fontSize: '0.85em', alignSelf: 'center' }}>
+                  {models.length} modelo{models.length > 1 ? 's' : ''} encontrado{models.length > 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+          )}
+          {models.length > 0 ? (
+            <select
+              value={config.model as string || ''}
+              onChange={(e) => handleChange('model', e.target.value)}
+              className="form-control"
+            >
+              {models.map(m => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          ) : (
             <input 
               type="text" 
               value={config.model as string || ''} 
               onChange={(e) => handleChange('model', e.target.value)}
               className="form-control"
               placeholder="Ex: local-model, gpt-4o"
-              list="available-models"
             />
-            {(config.provider === 'lmstudio' || config.provider === 'ollama') && (
-              <button 
-                className="btn btn-secondary" 
-                onClick={handleSyncModels}
-                disabled={syncing}
-                style={{ whiteSpace: 'nowrap' }}
-              >
-                {syncing ? 'Sincronizando...' : '🔄 Sincronizar'}
-              </button>
-            )}
-          </div>
-          <datalist id="available-models">
-            {models.map(m => <option key={m} value={m} />)}
-          </datalist>
+          )}
         </div>
 
         <div className="form-group">
@@ -111,6 +150,20 @@ export function SettingsPanel({ onClose, api }: SettingsPanelProps): React.JSX.E
             placeholder="http://localhost:1234/v1"
           />
         </div>
+
+        {(config.provider === 'omlx' || config.provider === 'openai' || config.provider === 'anthropic') && (
+          <div className="form-group">
+            <label>API Key {config.provider === 'omlx' ? '(senha do oMLX)' : ''}</label>
+            <input 
+              type="password" 
+              value={config.apiKey as string || ''} 
+              onChange={(e) => handleChange('apiKey', e.target.value)}
+              className="form-control"
+              placeholder={config.provider === 'omlx' ? 'Senha definida no oMLX' : 'sk-...'}
+              autoComplete="off"
+            />
+          </div>
+        )}
 
         <div className="form-group">
           <label>Máximo de Turnos</label>
