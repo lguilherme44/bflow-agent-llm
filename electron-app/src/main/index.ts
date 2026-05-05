@@ -160,10 +160,29 @@ function saveDashboardSessions(): void {
 
 function setupWebSocketServer(): void {
   const port = Number(appConfig.websocketPort || 3030);
-  wss = new WebSocketServer({ port });
-  console.log(`[WebSocket] Server running on ws://localhost:${port}`);
+  startWebSocketServer(port, 0);
+}
 
-  wss.on('connection', (ws) => {
+function startWebSocketServer(port: number, attempt: number): void {
+  const server = new WebSocketServer({ port });
+
+  server.once('listening', () => {
+    wss = server;
+    appConfig.websocketPort = port;
+    console.log(`[WebSocket] Server running on ws://localhost:${port}`);
+  });
+
+  server.once('error', (error: NodeJS.ErrnoException) => {
+    if (error.code === 'EADDRINUSE' && attempt < 10) {
+      console.warn(`[WebSocket] Port ${port} is busy, trying ${port + 1}`);
+      startWebSocketServer(port + 1, attempt + 1);
+      return;
+    }
+
+    console.error('[WebSocket] Failed to start server:', error);
+  });
+
+  server.on('connection', (ws) => {
     ws.send(JSON.stringify({ type: 'system', content: 'Connected to bflow-agent' }));
     sendDashboardSnapshot(ws);
 

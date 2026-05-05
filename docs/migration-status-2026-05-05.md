@@ -13,6 +13,14 @@ Completed in this pass:
 
 Remaining hardening after this pass:
 
-- Real packaged-app smoke test on Windows and macOS.
-- Native dependency rebuild verification for Electron packaging (`tree-sitter`, `@lancedb/lancedb`).
-- A real local-model run against LM Studio/Ollama/MLX to tune defaults by model family.
+- macOS packaged-app smoke test.
+- A real MLX run on macOS to tune defaults by model family.
+
+Validation update:
+
+- Windows `electron-builder --dir` passes and produces `electron-app/dist/win-unpacked/bflow-agent.exe`.
+- Windows `electron-builder --win` passes and produces `electron-app/dist/bflow-agent-1.0.0-setup.exe`.
+- Packaged Windows smoke test: `bflow-agent.exe` stayed alive for 8 seconds with isolated `BFLOW_AGENT_USER_DATA`.
+- Native dependency rebuild now passes with `npmRebuild: true`: `scripts/patch-tree-sitter-cxx20.cjs` patches `tree-sitter@0.21.1` from C++17 to C++20 before `electron-builder` invokes `@electron/rebuild`.
+- Rebuild was verified for `tree-sitter`, `tree-sitter-javascript`, `tree-sitter-json` and `tree-sitter-typescript`; packaging still unpacks `**/*.node` so native binaries load outside `app.asar`.
+- Windows local-model run was exercised with LM Studio `google/gemma-4-e4b`, including prompt/completion token usage and completion latency in logs.

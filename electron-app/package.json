@@ -13,9 +13,10 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
+    "prepare:native": "node ../scripts/patch-tree-sitter-cxx20.cjs",
     "build": "npm run typecheck && electron-vite build",
-    "build:unpack": "npm run build && electron-builder --dir",
-    "build:win": "npm run build && electron-builder --win",
+    "build:unpack": "npm run build && npm run prepare:native && electron-builder --dir",
+    "build:win": "npm run build && npm run prepare:native && electron-builder --win",
     "build:mac": "electron-vite build && electron-builder --mac",
     "build:linux": "electron-vite build && electron-builder --linux"
   },

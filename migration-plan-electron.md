@@ -191,8 +191,8 @@ graph TD
   └── package.json         # Root workspace
   ```
 - [x] Configurar build com `electron-builder` (via electron-vite built-in)
-- [ ] Testar `electron-rebuild` para dependências nativas (tree-sitter, lancedb) *(adiado para Fase 1 quando core/ for integrado)*
-- [ ] Configurar monorepo workspace (`npm workspaces`) se necessário para compartilhar `core/` *(adiado para Fase 1)*
+- [x] Testar `electron-rebuild` para dependências nativas (tree-sitter, lancedb) *(validado e corrigido: patch C++20 aplicado antes do rebuild; `@electron/rebuild` passa para tree-sitter e gramáticas)*
+- [x] Configurar monorepo workspace (`npm workspaces`) se necessário para compartilhar `core/`
 
 > [!WARNING]
 > `tree-sitter` e `@lancedb/lancedb` são módulos nativos. Precisam ser compilados para a versão do Electron (rebuild com `electron-rebuild`).
@@ -363,16 +363,16 @@ gantt
 ## 7. Checklist de Aceite
 
 ### MVP (mínimo para considerar migração concluída)
-- [ ] `vagent` e todos os módulos legados removidos
-- [ ] App Electron (`electron-vite`) abre e conecta ao modelo local
-- [ ] Usuário consegue enviar tarefa no chat e ver resposta em tempo real
-- [ ] Settings permite trocar modelo/provider/baseUrl
-- [ ] Status bar mostra modelo ativo e tokens
-- [ ] MCPManager funciona no Electron (stdio + SSE)
-- [ ] WebSocket server no main process broadcasta eventos
-- [ ] Dashboard externo (`dashboard/`) conecta via WebSocket e exibe sessões em tempo real
-- [ ] Build de distribuição Windows funcional
-- [ ] Zero referências ao stack legado no código
+- [x] `vagent` e todos os módulos legados removidos
+- [x] App Electron (`electron-vite`) abre e conecta ao modelo local
+- [x] Usuário consegue enviar tarefa no chat e ver resposta em tempo real
+- [x] Settings permite trocar modelo/provider/baseUrl
+- [x] Status bar mostra modelo ativo e tokens
+- [x] MCPManager funciona no Electron (stdio + SSE)
+- [x] WebSocket server no main process broadcasta eventos
+- [x] Dashboard externo (`dashboard/`) conecta via WebSocket e exibe sessões em tempo real
+- [x] Build de distribuição Windows funcional
+- [x] Zero referências ao stack legado no código
 
 ### Pós-MVP (Fase 2.5+)
 - [x] Tool calls aparecem na UI com detalhes
