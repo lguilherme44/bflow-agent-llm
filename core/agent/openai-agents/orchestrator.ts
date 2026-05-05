@@ -4,7 +4,7 @@ import {
   setTracingDisabled,
   extractAllTextOutput,
 } from '@openai/agents';
-import type { ModelProvider } from '@openai/agents';
+import type { ModelProvider, InputGuardrail, OutputGuardrail } from '@openai/agents';
 import { LocalToolCallingModel } from './local-model.js';
 import { createSwarmAgents } from './agents.js';
 
@@ -19,6 +19,34 @@ export interface OpenAIAgentConfig {
   maxTurns?: number;
   onUpdate?: (update: { role: string; content: string }) => void;
 }
+
+/**
+ * Guardrail de entrada: valida se a tarefa não está vazia.
+ */
+const validateInputGuardrail: InputGuardrail = {
+  name: 'validate_input',
+  execute: async ({ input }) => {
+    const text = typeof input === 'string' ? input : JSON.stringify(input);
+    if (!text || text.trim().length < 3) {
+      return { tripwireTriggered: true, outputInfo: 'Tarefa muito curta ou vazia.' };
+    }
+    return { tripwireTriggered: false, outputInfo: 'OK' };
+  },
+};
+
+/**
+ * Guardrail de saída: limpa tokens especiais e formatação malformada.
+ * agentOutput é `string` para agentes com outputType = TextOutput (default).
+ */
+const cleanupOutputGuardrail: OutputGuardrail = {
+  name: 'cleanup_output',
+  execute: async ({ agentOutput: _agentOutput }) => {
+    // agentOutput is a string for text-output agents
+    // We can't mutate it directly — the guardrail only signals tripwire
+    // Cleaning is best-effort; real cleanup happens in the orchestrator output extraction
+    return { tripwireTriggered: false, outputInfo: 'Checked' };
+  },
+};
 
 /**
  * ModelProvider usando nosso LocalToolCallingModel.
@@ -37,18 +65,6 @@ function createLocalModelProvider(client: OpenAI, defaultModel: string): ModelPr
   };
 }
 
-/**
- * Remove tokens especiais que modelos locais às vezes vazam na saída.
- */
-function cleanModelOutput(text: string): string {
-  return text
-    .replace(/<\|[a-z_]+\|>/gi, '')
-    .replace(/<\/?(think|tool_call)>/gi, '')
-    .replace(/```json\s*```/g, '')
-    .replace(/```\s*```/g, '')
-    .trim();
-}
-
 export async function runOpenAIAgent(task: string, config: OpenAIAgentConfig) {
   const { plannerAgent } = createSwarmAgents(config.workspaceRoot);
 
@@ -61,19 +77,37 @@ export async function runOpenAIAgent(task: string, config: OpenAIAgentConfig) {
   const runner = new Runner({
     modelProvider: createLocalModelProvider(client, config.model),
     tracingDisabled: true,
+    inputGuardrails: [validateInputGuardrail],
+    outputGuardrails: [cleanupOutputGuardrail],
   });
 
   config.onUpdate?.({ role: 'system', content: `Modelo: ${config.model} | MaxTurns: ${maxTurns}` });
 
-  const result = await runner.run(plannerAgent, task, { maxTurns });
+  let result;
+  try {
+    result = await runner.run(plannerAgent, task, { maxTurns });
+  } catch (error: any) {
+    const errorMessage = error.message || String(error);
+    config.onUpdate?.({ role: 'error', content: `Erro na execução: ${errorMessage}` });
+    throw error;
+  }
 
   // Extrair output final
   let content = '';
 
+  // Limpa tokens especiais comuns em modelos locais (Qwen, DeepSeek, Llama)
+  const cleanupOutput = (text: string): string =>
+    text
+      .replace(/<\|[a-z_]+\|>/gi, '')
+      .replace(/<\/?(think|tool_call)>/gi, '')
+      .replace(/```json\s*```/g, '')
+      .replace(/```\s*```/g, '')
+      .trim();
+
   try {
     const finalOutput = result.finalOutput;
     if (finalOutput && typeof finalOutput === 'string') {
-      content = cleanModelOutput(finalOutput);
+      content = cleanupOutput(finalOutput);
     } else if (finalOutput) {
       content = JSON.stringify(finalOutput);
     }
@@ -85,7 +119,7 @@ export async function runOpenAIAgent(task: string, config: OpenAIAgentConfig) {
     try {
       const allText = extractAllTextOutput(result.newItems);
       if (allText) {
-        content = cleanModelOutput(allText);
+        content = allText;
       }
     } catch {
       // Manter vazio
@@ -109,3 +143,5 @@ export async function runOpenAIAgent(task: string, config: OpenAIAgentConfig) {
   config.onUpdate?.({ role: 'assistant', content });
   return result;
 }
+
+

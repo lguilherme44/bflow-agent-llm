@@ -13,7 +13,7 @@ test('MCPManager Integration', async (t) => {
     mcpServers: {
       "mock": {
         "command": "npx",
-        "args": ["tsx", "src/tests/mock-mcp-server.ts"]
+        "args": ["tsx", "tests/mock-mcp-server.ts"]
       }
     }
   };

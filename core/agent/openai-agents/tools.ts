@@ -1,6 +1,6 @@
 import { tool } from '@openai/agents';
 import { z } from 'zod';
-import { DevelopmentToolOptions, listFiles, searchText } from '../../tools/development-tools.js';
+import { DevelopmentToolOptions, listFiles, searchText } from '../../utils/file-utils.js';
 import { TreeSitterParserService } from '../../code/tree-sitter-parser.js';
 import { AstGrepService } from '../../code/ast-grep-service.js';
 import { TypeScriptLanguageService } from '../../code/typescript-language-service.js';
@@ -156,7 +156,13 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
         }
         const newContent = content.replace(target, replacement);
         await editing.createFile(filepath, newContent);
-        return { success: true, filepath, message: `Replaced target (${target.length} chars) with replacement (${replacement.length} chars).` };
+        return {
+          success: true,
+          filepath,
+          message: `Replaced target (${target.length} chars) with replacement (${replacement.length} chars).`,
+          oldContent: content,
+          newContent,
+        };
       } catch (err) {
         return { error: `Failed to edit ${filepath}: ${err instanceof Error ? err.message : String(err)}` };
       }
@@ -230,7 +236,8 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
     description: 'Runs the configured npm test command. Use after code changes.',
     parameters: z.object({}),
     execute: async () => {
-      const result = await terminal.executeCommand('npm.cmd test', '.');
+      const command = process.platform === 'win32' ? 'npm.cmd test' : 'npm test';
+      const result = await terminal.executeCommand(command, '.');
       const failures = TerminalOutputParser.parseTestFailures(result.stdout, result.stderr);
       const relatedFiles = TerminalOutputParser.suggestFiles(failures);
       
@@ -251,7 +258,8 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       autoFix: z.boolean().default(false),
     }),
     execute: async ({ autoFix }) => {
-      const command = autoFix ? 'npm.cmd run lint -- --fix' : 'npm.cmd run lint';
+      const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+      const command = autoFix ? `${npm} run lint -- --fix` : `${npm} run lint`;
       const beforeStatus = await git.getParsedStatus();
       const result = await terminal.executeCommand(command, '.');
       const afterStatus = await git.getParsedStatus();

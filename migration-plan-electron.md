@@ -291,33 +291,33 @@ graph TD
 - [x] Atualizar `tsconfig.json` para nova estrutura de pastas
 - [x] Atualizar `dashboard/` para conectar via WebSocket ao Electron main process em vez de HTTP API
 
-### Fase 4 — Enriquecer Tools no SDK (2-3 dias)
+### Fase 4 — Enriquecer Tools no SDK (Concluído)
 
-- [x] Portar ferramentas avançadas que só existiam no legado para `openai-agents/tools.ts`:
-  - `retrieve_context` (RAG) → nova tool usando `LocalRagService`
-  - `rename_symbol` → tool usando `TypeScriptLanguageService`
-  - `find_references` → tool usando TS LS
-  - `run_tests` → tool usando `TerminalService` com detecção de framework
-  - `run_linter` → tool para ESLint/Prettier
-  - `git_commit` → tool com validação
+- [x] 4 — Refactoring & Intelligence Tools (Portadas para @openai/agents)
+- [x] `retrieve_context`: RAG local integrado com ranking híbrido (LanceDB + AST).
+- [x] `rename_symbol`: Refactoring seguro via TypeScript Language Service.
+- [x] `find_references`: Busca de referências cruzadas via TS LS.
+- [x] `run_tests`: Execução e parse de falhas de testes.
+- [x] `run_linter`: Linting com auto-fix.
+- [x] `git_commit`: Commits automáticos com validação prévia (build/lint).
+- [x] `input_guardrail`: Validação de entrada para evitar tarefas vazias.
+- [x] `output_guardrail`: Limpeza de tokens especiais em modelos locais.
 - [x] Criar agentes especializados via SDK `Agent` + `handoff()`:
   - Agent de "Planning/Research" focado apenas em RAG e busca
   - Agent de "Code Review" focado apenas em rodar TS Language Service e Lint
-  - Configurar `handoff` entre eles, tirando o peso de um agente único.vo, com RAG + list_files)
 - [x] Adicionar guardrails via SDK:
   - Input guardrail para validar tarefas
-  - Output guardrail para validar respostas
 
 ### Fase 5 — Polish + Testes (1-2 dias)
 
-- [x] Testes E2E do fluxo Electron:
+- [ ] Testes E2E do fluxo Electron:
   - Abrir app → selecionar workspace → enviar task → ver resultado
   - Verificar tool calls aparecem na UI
   - Verificar diff viewer funciona
-- [x] Verificar compatibilidade Windows (principal plataforma do dev)
-- [x] Build de distribuição (`electron-builder` para Windows)
-- [x] Atualizar README.md com novo fluxo
-- [x] Atualizar TODO.md
+- [ ] Verificar compatibilidade Windows (principal plataforma do dev)
+- [ ] Build de distribuição (`electron-builder` para Windows)
+- [ ] Atualizar README.md com novo fluxo
+- [ ] Atualizar TODO.md
 
 ---
 

@@ -2,14 +2,14 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { WebSocketServer } from 'ws';
-// @ts-ignore
-import { AgentRunner, AgentRunConfig, AgentEvent } from '@bflow/core';
+import { AgentRunner } from '@bflow/core';
+import type { AgentEvent } from '@bflow/core';
 import icon from '../../resources/icon.png?asset';
 
 import fs from 'fs';
 
 let mainWindow: BrowserWindow | null = null;
-let agentRunner: any | null = null;
+let agentRunner: AgentRunner | null = null;
 let wss: WebSocketServer | null = null;
 
 let currentWorkspace = process.cwd();
