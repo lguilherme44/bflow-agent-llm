@@ -18,3 +18,4 @@ export { EmbeddingProvider, TfIdfEmbeddingProvider, OllamaEmbeddingProvider } fr
 export { RankingUtils } from './rag/ranking-utils.js';
 
 export * from './types/index.js';
+export { MCPManager } from './mcp/mcp-manager.js';

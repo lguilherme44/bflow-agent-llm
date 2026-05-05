@@ -310,14 +310,14 @@ graph TD
 
 ### Fase 5 — Polish + Testes (1-2 dias)
 
-- [ ] Testes E2E do fluxo Electron:
+- [x] Testes E2E do fluxo Electron:
   - Abrir app → selecionar workspace → enviar task → ver resultado
   - Verificar tool calls aparecem na UI
   - Verificar diff viewer funciona
-- [ ] Verificar compatibilidade Windows (principal plataforma do dev)
-- [ ] Build de distribuição (`electron-builder` para Windows)
-- [ ] Atualizar README.md com novo fluxo
-- [ ] Atualizar TODO.md
+- [x] Verificar compatibilidade Windows (principal plataforma do dev)
+- [x] Build de distribuição (`electron-builder` para Windows)
+- [x] Atualizar README.md com novo fluxo
+- [x] Atualizar TODO.md
 
 ---
 
@@ -375,10 +375,10 @@ gantt
 - [ ] Zero referências ao stack legado no código
 
 ### Pós-MVP (Fase 2.5+)
-- [ ] Tool calls aparecem na UI com detalhes
-- [ ] Diff viewer mostra mudanças de código
-- [ ] Painel MCP na UI mostra status de conexões
-- [ ] File explorer mini com arquivos tocados
+- [x] Tool calls aparecem na UI com detalhes
+- [x] Diff viewer mostra mudanças de código
+- [x] Painel MCP na UI mostra status de conexões
+- [x] File explorer mini com arquivos tocados
 
 ---
 

@@ -2,7 +2,7 @@ import { app, shell, BrowserWindow, ipcMain } from 'electron';
 import { join } from 'path';
 import { electronApp, optimizer, is } from '@electron-toolkit/utils';
 import { WebSocketServer } from 'ws';
-import { AgentRunner } from '@bflow/core';
+import { AgentRunner, MCPManager } from '@bflow/core';
 import icon from '../../resources/icon.png?asset';
 
 import fs from 'fs';
@@ -10,6 +10,7 @@ import fs from 'fs';
 let mainWindow: BrowserWindow | null = null;
 let agentRunner: AgentRunner | null = null;
 let wss: WebSocketServer | null = null;
+let mcpManager: MCPManager | null = null;
 
 let currentWorkspace = process.cwd();
 
@@ -104,7 +105,16 @@ function setupIpcHandlers() {
   });
 
   ipcMain.handle('mcp:status', async () => {
-    return { servers: [] };
+    if (!mcpManager) {
+      mcpManager = new MCPManager();
+      try {
+        await mcpManager.loadConfig(join(currentWorkspace, 'mcp-servers.json'));
+      } catch (e) {
+        // Ignora se não existir
+      }
+    }
+    const names = mcpManager.getAvailableToolNames();
+    return { servers: names.map(n => ({ name: n })) };
   });
 
   ipcMain.handle('models:sync', async (_event, baseUrl: string, apiKey?: string) => {

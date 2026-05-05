@@ -560,15 +560,16 @@ Pronto quando: comandos sao executados de forma rastreavel, limitada e recuperav
 - [x] Implementar fallback automatico por:
   - [x] timeout
   - [x] rate limit
-- [ ] rate limit por task (Necessario para múltiplos sub-agentes paralelos)
+- [x] rate limit por task (Necessario para múltiplos sub-agentes paralelos)
 - [x] custo maximo
 - [x] erro de provider
-- [ ] Parcial: Implementar streaming opcional.
+- [x] Parcial: Implementar streaming opcional.
   - [x] capacidades declaradas por provider
   - [x] Integrar LLM Streaming (runtime exposto ao loop)
 - [x] Implementar tool/function calling nativo quando provider suportar.
 - [x] Medir tokens e custo por chamada.
 - [x] Criar redacao de secrets antes de enviar contexto ao LLM.
+- [x] NOVO: Interface Desktop/Electron (Fase MVP e Pós-MVP concluídas, com Diff Viewer, MCP Panel, File Explorer, History).
 - [x] NOVO: Interface interativa `/connect` para configuracao dinamica de provedores.
 - [x] NOVO: Integracao com APIs locais para listagem e download automatico de modelos (Ollama/LM Studio).
 - [x] Criar testes com mock provider e golden outputs.
