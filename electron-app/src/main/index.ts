@@ -13,8 +13,9 @@ let wss: WebSocketServer | null = null;
 
 let currentWorkspace = process.cwd();
 
-// Store config in file
+// Store config and history in file
 const getConfigPath = () => join(app.getPath('userData'), 'bflow-agent-config.json');
+const getHistoryPath = () => join(app.getPath('userData'), 'bflow-agent-history.json');
 
 const defaultConfig: Record<string, unknown> = {
   provider: 'lmstudio',
@@ -172,6 +173,61 @@ function setupIpcHandlers() {
       return { success: true };
     }
     return { success: false, error: 'Agent is not running' };
+  });
+
+  // History IPC handlers
+  ipcMain.handle('history:load', async () => {
+    try {
+      const p = getHistoryPath();
+      if (fs.existsSync(p)) {
+        const data = fs.readFileSync(p, 'utf-8');
+        return JSON.parse(data);
+      }
+      return [];
+    } catch (err) {
+      console.error('[IPC] Failed to load history:', err);
+      return [];
+    }
+  });
+
+  ipcMain.handle('history:saveSession', async (_event, session: any) => {
+    try {
+      const p = getHistoryPath();
+      let history: any[] = [];
+      if (fs.existsSync(p)) {
+        const data = fs.readFileSync(p, 'utf-8');
+        history = JSON.parse(data);
+      }
+      
+      const index = history.findIndex(s => s.id === session.id);
+      if (index >= 0) {
+        history[index] = session;
+      } else {
+        history.unshift(session); // Add to beginning
+      }
+      
+      fs.writeFileSync(p, JSON.stringify(history, null, 2), 'utf-8');
+      return { success: true };
+    } catch (err: any) {
+      console.error('[IPC] Failed to save history session:', err);
+      return { success: false, error: err.message };
+    }
+  });
+
+  ipcMain.handle('history:deleteSession', async (_event, sessionId: string) => {
+    try {
+      const p = getHistoryPath();
+      if (fs.existsSync(p)) {
+        const data = fs.readFileSync(p, 'utf-8');
+        let history: any[] = JSON.parse(data);
+        history = history.filter(s => s.id !== sessionId);
+        fs.writeFileSync(p, JSON.stringify(history, null, 2), 'utf-8');
+      }
+      return { success: true };
+    } catch (err: any) {
+      console.error('[IPC] Failed to delete history session:', err);
+      return { success: false, error: err.message };
+    }
   });
 }
 

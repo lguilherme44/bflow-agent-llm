@@ -58,17 +58,16 @@ export class LocalRagService {
   private resolveDefaultProvider(): EmbeddingProvider {
     const type = process.env.EMBEDDING_PROVIDER || 'auto';
 
-    // Detect Ollama if available
-    if (type === 'ollama' || type === 'auto') {
+    // Detect Ollama if explicitly requested
+    if (type === 'ollama') {
       const model = process.env.OLLAMA_EMBED_MODEL || 'nomic-embed-text';
       const baseUrl = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
       const dimensions = Number.parseInt(process.env.EMBEDDING_DIMENSIONS || '768', 10);
 
-      // Try Ollama — if it fails, fall back to TF-IDF
       try {
         return new OllamaEmbeddingProvider(dimensions, model, baseUrl);
       } catch {
-        // Ollama unavailable — use TF-IDF silently
+        // Fallback
       }
     }
 

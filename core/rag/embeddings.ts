@@ -118,6 +118,8 @@ export class TfIdfEmbeddingProvider implements EmbeddingProvider {
 export class OllamaEmbeddingProvider implements EmbeddingProvider {
   readonly name = 'ollama';
   
+  private isHealthy = true;
+
   constructor(
     readonly dimensions = 768,
     private readonly model = 'nomic-embed-text',
@@ -130,6 +132,10 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
   }
 
   async embedBatch(texts: string[]): Promise<Float32Array[]> {
+    if (!this.isHealthy) {
+      return texts.map(() => new Float32Array(this.dimensions));
+    }
+
     try {
       const response = await fetch(`${this.baseUrl}/api/embed`, {
         method: 'POST',
@@ -138,6 +144,8 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
           model: this.model,
           input: texts,
         }),
+        // Add timeout so it fails fast
+        signal: AbortSignal.timeout(2000)
       });
 
       if (!response.ok) {
@@ -148,7 +156,8 @@ export class OllamaEmbeddingProvider implements EmbeddingProvider {
       const data = await response.json() as { embeddings: number[][] };
       return data.embeddings.map((emb) => new Float32Array(emb));
     } catch (error) {
-      console.error('Failed to get embeddings from Ollama:', error);
+      this.isHealthy = false;
+      console.error('Failed to get embeddings from Ollama, disabling vector search:', error instanceof Error ? error.message : String(error));
       // Return zero vectors on failure to avoid crashing the RAG pipeline
       return texts.map(() => new Float32Array(this.dimensions));
     }

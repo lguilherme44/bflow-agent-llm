@@ -4,6 +4,7 @@ import { SettingsPanel } from './components/SettingsPanel'
 import { ToolActivityPanel } from './components/ToolActivityPanel'
 import { FileExplorerPanel } from './components/FileExplorerPanel'
 import { McpPanel } from './components/McpPanel'
+import { HistoryPanel } from './components/HistoryPanel'
 import { useAgent } from './hooks/useAgent'
 
 // Safe API access — fallback when running outside Electron (e.g. browser preview)
@@ -16,17 +17,20 @@ const api = window.api ?? {
   syncModels: async (_baseUrl: string) => ({ success: true, models: ['mock-model'] }),
   runAgent: async (task: string) => { console.log('Mock runAgent:', task); return { success: true }; },
   stopAgent: async () => ({ success: true }),
-  onAgentEvent: () => () => {}
+  onAgentEvent: () => () => {},
+  loadHistory: async () => [],
+  saveHistorySession: async () => ({ success: true }),
+  deleteHistorySession: async () => ({ success: true })
 }
 
 function App(): React.JSX.Element {
   const [config, setConfig] = useState<any>({})
   const [workspace, setWorkspace] = useState('')
   const [showSettings, setShowSettings] = useState(false)
-  const [activeTab, setActiveTab] = useState<'tools' | 'mcp' | 'files'>('tools')
+  const [activeTab, setActiveTab] = useState<'history' | 'tools' | 'mcp' | 'files'>('history')
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
-  const { messages, toolCalls, isRunning, thinking, runAgent, stopAgent } = useAgent(api)
+  const { messages, toolCalls, isRunning, thinking, runAgent, stopAgent, startNewSession, loadSession } = useAgent(api)
 
   // Load config and workspace on mount
   useEffect(() => {
@@ -90,6 +94,12 @@ function App(): React.JSX.Element {
             <div className={`sidebar ${!isSidebarOpen ? 'sidebar--closed' : ''}`}>
               <div className="sidebar__tabs">
                 <button 
+                  className={`sidebar__tab ${activeTab === 'history' ? 'sidebar__tab--active' : ''}`}
+                  onClick={() => setActiveTab('history')}
+                >
+                  History
+                </button>
+                <button 
                   className={`sidebar__tab ${activeTab === 'tools' ? 'sidebar__tab--active' : ''}`}
                   onClick={() => setActiveTab('tools')}
                 >
@@ -109,6 +119,7 @@ function App(): React.JSX.Element {
                 </button>
               </div>
               <div className="sidebar__content">
+                {activeTab === 'history' && <HistoryPanel api={api} onSelectSession={loadSession} onNewSession={startNewSession} />}
                 {activeTab === 'tools' && <ToolActivityPanel toolCalls={toolCalls} />}
                 {activeTab === 'mcp' && <McpPanel api={api} />}
                 {activeTab === 'files' && <FileExplorerPanel toolCalls={toolCalls} />}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 export interface Message {
   id: string
@@ -17,10 +17,18 @@ export interface ToolCall {
 }
 
 export function useAgent(api: any) {
+  const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
+  const [sessionTitle, setSessionTitle] = useState<string>('Nova Conversa')
   const [messages, setMessages] = useState<Message[]>([])
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [thinking, setThinking] = useState<string | null>(null)
+
+  // Refs for latest state in event callbacks
+  const stateRef = useRef({ messages, toolCalls, sessionId, sessionTitle })
+  useEffect(() => {
+    stateRef.current = { messages, toolCalls, sessionId, sessionTitle }
+  }, [messages, toolCalls, sessionId, sessionTitle])
 
   useEffect(() => {
     const cleanup = api.onAgentEvent((event: any) => {
@@ -38,6 +46,18 @@ export function useAgent(api: any) {
         if (event.type === 'complete' || event.type === 'error') {
           setIsRunning(false)
           setThinking(null)
+
+          // Auto-save session
+          const { sessionId, sessionTitle, messages: currentMsgs, toolCalls: currentCalls } = stateRef.current
+          if (currentMsgs.length > 0) {
+            api.saveHistorySession({
+              id: sessionId,
+              title: sessionTitle,
+              timestamp: Date.now(),
+              messages: currentMsgs,
+              toolCalls: currentCalls
+            })
+          }
         }
       } else if (event.type === 'thinking') {
         setThinking(event.content)
@@ -89,8 +109,16 @@ export function useAgent(api: any) {
       timestamp: Date.now()
     }
 
-    setMessages((prev) => [...prev, userMsg])
-    setToolCalls([])
+    setMessages((prev) => {
+      const newMsgs = [...prev, userMsg]
+      // Set title on first message
+      if (newMsgs.length === 1) {
+        setSessionTitle(task.slice(0, 40) + (task.length > 40 ? '...' : ''))
+      }
+      return newMsgs
+    })
+    
+    // Do NOT clear toolCalls if we are continuing a conversation
     setThinking(null)
     setIsRunning(true)
 
@@ -117,12 +145,32 @@ export function useAgent(api: any) {
     setThinking(null)
   }, [api])
 
+  const startNewSession = useCallback(() => {
+    setSessionId(crypto.randomUUID())
+    setSessionTitle('Nova Conversa')
+    setMessages([])
+    setToolCalls([])
+    setThinking(null)
+    setIsRunning(false)
+  }, [])
+
+  const loadSession = useCallback((session: any) => {
+    setSessionId(session.id)
+    setSessionTitle(session.title || 'Conversa Salva')
+    setMessages(session.messages || [])
+    setToolCalls(session.toolCalls || [])
+    setThinking(null)
+    setIsRunning(false)
+  }, [])
+
   return {
     messages,
     toolCalls,
     isRunning,
     thinking,
     runAgent,
-    stopAgent
+    stopAgent,
+    startNewSession,
+    loadSession
   }
 }

@@ -21,6 +21,10 @@ const agentAPI = {
   // Agent execution
   runAgent: (task: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('agent:run', task),
   stopAgent: (): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('agent:stop'),
+  // History
+  loadHistory: (): Promise<any[]> => ipcRenderer.invoke('history:load'),
+  saveHistorySession: (session: any): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('history:saveSession', session),
+  deleteHistorySession: (id: string): Promise<{ success: boolean; error?: string }> => ipcRenderer.invoke('history:deleteSession', id),
 
   // Agent events (Phase 1 — will add agent:run, agent:stop, agent:event)
   onAgentEvent: (callback: (event: unknown) => void): (() => void) => {
