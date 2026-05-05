@@ -237,10 +237,10 @@ graph TD
 ### Fase 2 — UI React Mínima no Electron (2-3 dias)
 
 **MVP (escopo inicial)**:
-- [ ] Design system base (CSS variables, Google Fonts, dark theme premium)
-- [ ] **Chat Panel**: input de mensagem + bolhas de conversa com markdown renderizado
-- [ ] **Settings/Connect**: configuração de provider (Ollama/LM Studio), modelo, baseUrl, API keys
-- [ ] **Status Bar**: modelo ativo, tokens consumidos, workspace selecionado, status MCP
+- [x] Design system base (CSS variables, Google Fonts, dark theme premium)
+- [x] **Chat Panel**: input de mensagem + bolhas de conversa com markdown renderizado
+- [x] **Settings/Connect**: configuração de provider (Ollama/LM Studio), modelo, baseUrl, API keys
+- [x] **Status Bar**: modelo ativo, tokens consumidos, workspace selecionado, status MCP
 
 **Iteração posterior (Fase 2.5 — após MVP rodar)**:
 - [ ] **Tool Activity**: painel lateral mostrando tool calls em tempo real
@@ -253,7 +253,7 @@ graph TD
 
 ### Fase 3 — Eliminar Stack Legado (1-2 dias)
 
-- [ ] Remover arquivos listados na seção "REMOVER":
+- [x] Remover arquivos listados na seção "REMOVER":
   - `src/visual-cli.tsx`
   - `src/ui/App.tsx`
   - `src/agent/orchestrator.ts`
@@ -282,14 +282,14 @@ graph TD
   - `src/cli.ts` (entry point CLI — removido, tudo via Electron)
   - `src/server.ts` (server HTTP — WebSocket migra para main process, REST removido)
   - `src/index.ts` (exports legados — recriar com novo core)
-- [ ] Remover deps não mais usadas do `package.json`:
+- [x] Remover deps não mais usadas do `package.json`:
   - `ink`, `ink-spinner`, `ink-text-input`
   - `commander` (sem CLI)
   - `picocolors` (sem CLI)
-- [ ] Recriar `core/index.ts` para exportar apenas módulos do novo core
-- [ ] Limpar `package.json` scripts: remover `vagent`, `vagent:*`, `agent:*`, `dev`, `agent`
-- [ ] Atualizar `tsconfig.json` para nova estrutura de pastas
-- [ ] Atualizar `dashboard/` para conectar via WebSocket ao Electron main process em vez de HTTP API
+- [x] Recriar `core/index.ts` para exportar apenas módulos do novo core
+- [x] Limpar `package.json` scripts: remover `vagent`, `vagent:*`, `agent:*`, `dev`, `agent`
+- [x] Atualizar `tsconfig.json` para nova estrutura de pastas
+- [x] Atualizar `dashboard/` para conectar via WebSocket ao Electron main process em vez de HTTP API
 
 ### Fase 4 — Enriquecer Tools no SDK (2-3 dias)
 

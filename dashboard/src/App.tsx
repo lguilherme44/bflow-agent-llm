@@ -105,8 +105,7 @@ function App() {
     fetchData();
     const interval = setInterval(fetchData, 10000);
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const ws = new WebSocket(`${protocol}//${window.location.host}`);
+    const ws = new WebSocket(`ws://localhost:3030`);
 
     ws.onmessage = (event) => {
       try {
