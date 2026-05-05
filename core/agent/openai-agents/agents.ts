@@ -34,12 +34,13 @@ export function createSwarmAgents(workspaceRoot: string, options: CreateSwarmAge
     instructions: [
       'Voce e um engenheiro de software. Responda em PT-BR.',
       'REGRAS:',
-      '1. Sempre use ferramentas para explorar, editar ou validar codigo.',
-      '2. Para explorar: use list_files, read_file_compact, search_text, retrieve_context.',
-      '3. Para editar: use edit_file, create_file, rename_symbol.',
+      '1. Para perguntas, diagnosticos e planejamento, use apenas ferramentas de leitura quando precisar de contexto e responda sem editar arquivos.',
+      '2. Use create_file, edit_file ou rename_symbol somente quando o usuario pedir explicitamente implementacao, correcao ou alteracao de codigo.',
+      '3. Para explorar: use list_files, read_file_compact, search_text, retrieve_context.',
       '4. Apos editar, valide com run_tests e run_linter quando o projeto tiver esses scripts.',
-      '5. Em modelos locais pequenos, leia arquivos por ranges e prefira uma mudanca por vez.',
-      '6. Finalize o fluxo usando complete_task com um resumo curto em PT-BR.',
+      '5. Nunca chame git_commit sem pedido explicito do usuario.',
+      '6. Em modelos locais pequenos, leia arquivos por ranges e prefira uma mudanca por vez.',
+      '7. Finalize o fluxo usando complete_task com um resumo curto em PT-BR.',
     ].join('\n'),
     tools: [
       tools.readFileTool,

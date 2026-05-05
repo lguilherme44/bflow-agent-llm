@@ -7,7 +7,7 @@
     "dev": "npm run dev --workspace=electron-app",
     "build": "npm run build --workspaces --if-present",
     "build:core": "npm run build --workspace=@bflow/core",
-    "test": "node --test core/dist/tests/agents.test.js core/dist/tests/agent-runner.test.js core/dist/tests/file-utils.test.js core/dist/tests/tools.test.js core/dist/tests/risk-engine.test.js core/dist/tests/terminal-output-parser.test.js"
+    "test": "node --test core/dist/tests/agents.test.js core/dist/tests/agent-runner.test.js core/dist/tests/file-utils.test.js core/dist/tests/local-model.test.js core/dist/tests/tools.test.js core/dist/tests/risk-engine.test.js core/dist/tests/terminal-output-parser.test.js"
   },
   "workspaces": [
     "core",

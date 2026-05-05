@@ -18,8 +18,64 @@ export interface LocalModelOptions {
   maxOutputTokens?: number;
   maxInputChars?: number;
   maxToolOutputChars?: number;
+  maxMalformedRetries?: number;
   temperature?: number;
   onModelEvent?: (event: LocalModelEvent) => void;
+}
+
+const MALFORMED_LOCAL_OUTPUT_MESSAGE =
+  'O modelo local retornou uma resposta malformada. Tente novamente com uma pergunta mais direta ou troque para um perfil/modelo mais estavel.';
+
+export function sanitizeLocalModelText(text: string): string {
+  return text
+    .replace(/<\|[a-z_]+\|>/gi, '')
+    .replace(/<think>[\s\S]*?<\/think>/gi, '')
+    .replace(/<\/?(think|tool_call)>/gi, '')
+    .replace(/```json\s*```/g, '')
+    .replace(/```\s*```/g, '')
+    .trim();
+}
+
+export function isMalformedLocalOutput(text: string): boolean {
+  const trimmed = sanitizeLocalModelText(text);
+  if (trimmed.length < 80) return false;
+
+  if (isValidJsonPayload(trimmed)) return false;
+  if (looksLikeCodeOrMarkup(trimmed)) return false;
+
+  const letters = trimmed.match(/\p{L}/gu)?.length ?? 0;
+  const symbolNoise = trimmed.match(/[#@>{}\\/_|=*~^<>\[\]`]/g)?.length ?? 0;
+  const zeroRuns = trimmed.match(/0{2,}|0##|##0|>>0|0>>/g)?.length ?? 0;
+  const repeatedMarkers = trimmed.match(/(##|>>|@@|--|__|\.S|See|For|0##|##0)/g)?.length ?? 0;
+  const words = trimmed.match(/\p{L}{3,}/gu)?.length ?? 0;
+
+  const symbolRatio = symbolNoise / trimmed.length;
+  const letterRatio = letters / trimmed.length;
+
+  if (repeatedMarkers >= 12 && symbolRatio > 0.22) return true;
+  if (zeroRuns >= 8 && repeatedMarkers >= 8) return true;
+  if (symbolRatio > 0.48 && letterRatio < 0.28) return true;
+  if (trimmed.length > 200 && words < 8 && symbolRatio > 0.35) return true;
+
+  return false;
+}
+
+function isValidJsonPayload(text: string): boolean {
+  const trimmed = text.trim();
+  if (!((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']')))) {
+    return false;
+  }
+
+  try {
+    JSON.parse(trimmed);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeCodeOrMarkup(text: string): boolean {
+  return /```|(^|\s)(function|const|let|class|import|export|return|if|for|while)\s|=>|<\/?[a-z][\w-]*[\s>]/i.test(text);
 }
 
 /**
@@ -65,52 +121,72 @@ export class LocalToolCallingModel {
       });
     }
 
-    const startedAt = Date.now();
-    const completion = await this.client.chat.completions.create(
-      {
+    const maxMalformedRetries = this.options.maxMalformedRetries ?? 1;
+    let activeMessages = messages;
+    let lastCompletion: any;
+
+    for (let attempt = 0; attempt <= maxMalformedRetries; attempt += 1) {
+      const startedAt = Date.now();
+      const completion = await this.client.chat.completions.create(
+        {
+          model: this.model,
+          messages: activeMessages,
+          tools: tools && tools.length > 0 ? tools : undefined,
+          temperature: request.modelSettings?.temperature ?? this.options.temperature ?? 0.1,
+          max_tokens: request.modelSettings?.maxTokens ?? this.options.maxOutputTokens ?? 1536,
+        },
+        request.signal ? { signal: request.signal } : undefined
+      );
+      lastCompletion = completion;
+
+      this.options.onModelEvent?.({
+        provider: this.options.provider ?? 'local',
         model: this.model,
-        messages,
-        tools: tools && tools.length > 0 ? tools : undefined,
-        temperature: request.modelSettings?.temperature ?? this.options.temperature ?? 0.1,
-        max_tokens: request.modelSettings?.maxTokens ?? this.options.maxOutputTokens ?? 1536,
-      },
-      request.signal ? { signal: request.signal } : undefined
-    );
-
-    this.options.onModelEvent?.({
-      provider: this.options.provider ?? 'local',
-      model: this.model,
-      usage: {
-        promptTokens: completion.usage?.prompt_tokens ?? 0,
-        completionTokens: completion.usage?.completion_tokens ?? 0,
-        totalTokens: completion.usage?.total_tokens ?? 0,
-      },
-      latencyMs: Date.now() - startedAt,
-      requestMessages: messages.length,
-    });
-
-    const choice = completion.choices[0];
-    if (!choice) return this.createEmptyResponse(completion);
-
-    if (debug) {
-      console.error('[LocalModel] response', {
-        finishReason: choice.finish_reason,
-        hasToolCalls: Boolean(choice.message.tool_calls?.length),
-        contentPreview: String(choice.message.content ?? '').slice(0, 240),
+        usage: {
+          promptTokens: completion.usage?.prompt_tokens ?? 0,
+          completionTokens: completion.usage?.completion_tokens ?? 0,
+          totalTokens: completion.usage?.total_tokens ?? 0,
+        },
+        latencyMs: Date.now() - startedAt,
+        requestMessages: activeMessages.length,
       });
+
+      const choice = completion.choices[0];
+      if (!choice) return this.createEmptyResponse(completion);
+
+      if (debug) {
+        console.error('[LocalModel] response', {
+          attempt,
+          finishReason: choice.finish_reason,
+          hasToolCalls: Boolean(choice.message.tool_calls?.length),
+          contentPreview: String(choice.message.content ?? '').slice(0, 240),
+        });
+      }
+
+      if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
+        return this.convertNativeToolCalls(choice, completion);
+      }
+
+      const content = choice.message.content || '';
+      const extractedCall = this.extractToolCallFromContent(content);
+      if (extractedCall && this.toolSchemas.has(extractedCall.name)) {
+        return this.convertExtractedToolCall(extractedCall, completion);
+      }
+
+      const cleaned = this.cleanSpecialTokens(content);
+      if (isMalformedLocalOutput(cleaned)) {
+        if (attempt < maxMalformedRetries) {
+          activeMessages = this.withMalformedRetryInstruction(messages);
+          continue;
+        }
+
+        return this.convertTextResponse(MALFORMED_LOCAL_OUTPUT_MESSAGE, completion);
+      }
+
+      return this.convertTextResponse(cleaned, completion);
     }
 
-    if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
-      return this.convertNativeToolCalls(choice, completion);
-    }
-
-    const content = choice.message.content || '';
-    const extractedCall = this.extractToolCallFromContent(content);
-    if (extractedCall && this.toolSchemas.has(extractedCall.name)) {
-      return this.convertExtractedToolCall(extractedCall, completion);
-    }
-
-    return this.convertTextResponse(content, completion);
+    return this.createEmptyResponse(lastCompletion);
   }
 
   async *getStreamedResponse(request: any): AsyncIterable<any> {
@@ -299,12 +375,22 @@ export class LocalToolCallingModel {
   }
 
   private cleanSpecialTokens(text: string): string {
-    return text
-      .replace(/<\|[a-z_]+\|>/gi, '')
-      .replace(/<\/?(think|tool_call)>/gi, '')
-      .replace(/```json\s*```/g, '')
-      .replace(/```\s*```/g, '')
-      .trim();
+    return sanitizeLocalModelText(text);
+  }
+
+  private withMalformedRetryInstruction(messages: OpenAI.ChatCompletionMessageParam[]): OpenAI.ChatCompletionMessageParam[] {
+    return [
+      ...messages,
+      {
+        role: 'user',
+        content: [
+          'A resposta anterior ficou ilegivel ou corrompida.',
+          'Responda novamente em PT-BR de forma curta e clara.',
+          'Se precisar usar ferramenta, emita exatamente uma chamada valida usando o schema fornecido.',
+          'Nao emita simbolos aleatorios, markdown quebrado, templates ou texto parcialmente gerado.',
+        ].join(' '),
+      },
+    ];
   }
 
   private extractUsage(completion: any) {
