@@ -16,6 +16,27 @@ export interface ToolCall {
   timestamp: number
 }
 
+export interface RunStats {
+  startedAt: number | null
+  elapsedMs: number
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  llmCalls: number
+  lastLatencyMs: number
+  backendSessionId?: string
+}
+
+const emptyRunStats = (): RunStats => ({
+  startedAt: null,
+  elapsedMs: 0,
+  promptTokens: 0,
+  completionTokens: 0,
+  totalTokens: 0,
+  llmCalls: 0,
+  lastLatencyMs: 0
+})
+
 export function useAgent(api: any) {
   const [sessionId, setSessionId] = useState<string>(() => crypto.randomUUID())
   const [sessionTitle, setSessionTitle] = useState<string>('Nova Conversa')
@@ -23,12 +44,25 @@ export function useAgent(api: any) {
   const [toolCalls, setToolCalls] = useState<ToolCall[]>([])
   const [isRunning, setIsRunning] = useState(false)
   const [thinking, setThinking] = useState<string | null>(null)
+  const [runStats, setRunStats] = useState<RunStats>(() => emptyRunStats())
 
   // Refs for latest state in event callbacks
-  const stateRef = useRef({ messages, toolCalls, sessionId, sessionTitle })
+  const stateRef = useRef({ messages, toolCalls, sessionId, sessionTitle, runStats })
   useEffect(() => {
-    stateRef.current = { messages, toolCalls, sessionId, sessionTitle }
-  }, [messages, toolCalls, sessionId, sessionTitle])
+    stateRef.current = { messages, toolCalls, sessionId, sessionTitle, runStats }
+  }, [messages, toolCalls, sessionId, sessionTitle, runStats])
+
+  useEffect(() => {
+    if (!isRunning || !stateRef.current.runStats.startedAt) return
+
+    const interval = window.setInterval(() => {
+      const startedAt = stateRef.current.runStats.startedAt
+      if (!startedAt) return
+      setRunStats((prev) => ({ ...prev, elapsedMs: Date.now() - startedAt }))
+    }, 1000)
+
+    return () => window.clearInterval(interval)
+  }, [isRunning])
 
   useEffect(() => {
     const cleanup = api.onAgentEvent((event: any) => {
@@ -57,7 +91,8 @@ export function useAgent(api: any) {
               title: sessionTitle,
               timestamp: Date.now(),
               messages: currentMsgs,
-              toolCalls: currentCalls
+              toolCalls: currentCalls,
+              runStats: stateRef.current.runStats
             })
           }
         }
@@ -107,6 +142,25 @@ export function useAgent(api: any) {
          }
          stateRef.current.toolCalls = newCalls
          setToolCalls(newCalls)
+      } else if (event.type === 'llm') {
+        const usage = event.metadata?.usage ?? {}
+        const promptTokens = Number(usage.promptTokens ?? usage.inputTokens ?? 0)
+        const completionTokens = Number(usage.completionTokens ?? usage.outputTokens ?? 0)
+        const totalTokens = Number(usage.totalTokens ?? promptTokens + completionTokens)
+        const lastLatencyMs = Number(event.metadata?.latencyMs ?? 0)
+
+        setRunStats((prev) => {
+          const next = {
+            ...prev,
+            promptTokens: prev.promptTokens + promptTokens,
+            completionTokens: prev.completionTokens + completionTokens,
+            totalTokens: prev.totalTokens + totalTokens,
+            llmCalls: prev.llmCalls + 1,
+            lastLatencyMs
+          }
+          stateRef.current.runStats = next
+          return next
+        })
       }
     })
 
@@ -123,6 +177,12 @@ export function useAgent(api: any) {
 
     const newMsgs = [...stateRef.current.messages, userMsg]
     stateRef.current.messages = newMsgs
+    const nextStats: RunStats = {
+      ...emptyRunStats(),
+      startedAt: Date.now(),
+      promptTokens: estimatePromptTokens(task)
+    }
+    stateRef.current.runStats = nextStats
 
     // Set title on first message
     if (newMsgs.length === 1) {
@@ -132,15 +192,32 @@ export function useAgent(api: any) {
     }
     
     setMessages(newMsgs)
+    setRunStats(nextStats)
     
     // Do NOT clear toolCalls if we are continuing a conversation
     setThinking(null)
     setIsRunning(true)
 
+    api.saveHistorySession({
+      id: stateRef.current.sessionId,
+      title: stateRef.current.sessionTitle,
+      timestamp: Date.now(),
+      messages: newMsgs,
+      toolCalls: stateRef.current.toolCalls,
+      runStats: nextStats
+    })
+
     try {
       const response = await api.runAgent(task)
       if (!response.success) {
         throw new Error(response.error || 'Failed to start agent')
+      }
+      if (response.sessionId) {
+        setRunStats((prev) => {
+          const next = { ...prev, backendSessionId: response.sessionId }
+          stateRef.current.runStats = next
+          return next
+        })
       }
     } catch (error: any) {
       const errorMsg: Message = {
@@ -151,6 +228,7 @@ export function useAgent(api: any) {
       }
       setMessages((prev) => [...prev, errorMsg])
       setIsRunning(false)
+      setRunStats((prev) => ({ ...prev, elapsedMs: prev.startedAt ? Date.now() - prev.startedAt : prev.elapsedMs }))
     }
   }, [api])
 
@@ -158,6 +236,7 @@ export function useAgent(api: any) {
     await api.stopAgent()
     setIsRunning(false)
     setThinking(null)
+    setRunStats((prev) => ({ ...prev, elapsedMs: prev.startedAt ? Date.now() - prev.startedAt : prev.elapsedMs }))
   }, [api])
 
   const startNewSession = useCallback(() => {
@@ -167,6 +246,7 @@ export function useAgent(api: any) {
     setToolCalls([])
     setThinking(null)
     setIsRunning(false)
+    setRunStats(emptyRunStats())
   }, [])
 
   const loadSession = useCallback((session: any) => {
@@ -176,6 +256,7 @@ export function useAgent(api: any) {
     setToolCalls(session.toolCalls || [])
     setThinking(null)
     setIsRunning(false)
+    setRunStats(session.runStats || emptyRunStats())
   }, [])
 
   return {
@@ -183,9 +264,16 @@ export function useAgent(api: any) {
     toolCalls,
     isRunning,
     thinking,
+    runStats,
     runAgent,
     stopAgent,
     startNewSession,
     loadSession
   }
+}
+
+function estimatePromptTokens(text: string): number {
+  const trimmed = text.trim()
+  if (!trimmed) return 0
+  return Math.max(1, Math.ceil(trimmed.length / 4))
 }

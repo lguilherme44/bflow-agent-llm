@@ -41,6 +41,7 @@ export function createSwarmAgents(workspaceRoot: string, options: CreateSwarmAge
       '5. Nunca chame git_commit sem pedido explicito do usuario.',
       '6. Em modelos locais pequenos, leia arquivos por ranges e prefira uma mudanca por vez.',
       '7. Finalize o fluxo usando complete_task com um resumo curto em PT-BR.',
+      '8. NUNCA abra previews, navegadores ou servidores de desenvolvimento automaticamente, a menos que o usuario peca explicitamente.',
     ].join('\n'),
     tools: [
       tools.readFileTool,

@@ -114,6 +114,17 @@ export function SessionDetail({ sessionId, logs, breakdown, onBack, onDelete }: 
         </div>
       )}
 
+      {breakdown?.prompt && (
+        <div className="card" style={{ marginBottom: '32px' }}>
+          <div className="card-header">
+            <h2 className="card-title">Prompt original</h2>
+          </div>
+          <pre className="log-payload" style={{ whiteSpace: 'pre-wrap', margin: 0 }}>
+            {breakdown.prompt}
+          </pre>
+        </div>
+      )}
+
       {/* PROVIDER BREAKDOWN */}
       {breakdown && breakdown.providers.length > 0 && (
         <div className="card" style={{ marginBottom: '32px' }}>

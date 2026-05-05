@@ -30,6 +30,7 @@ interface RuntimeLogEntry {
 interface RuntimeSession {
   id: string;
   task: string;
+  prompt: string;
   startTime: string;
   lastUpdateTime: string;
   status: 'completed' | 'error' | 'in_progress';
@@ -337,6 +338,7 @@ function buildSessionMetadata(session: RuntimeSession) {
     startTime: session.startTime,
     lastUpdateTime: session.lastUpdateTime,
     task: session.task,
+    prompt: session.prompt ?? session.task,
     status: session.status,
     tokenUsage: breakdown.tokenUsage.total,
     promptTokens: breakdown.tokenUsage.prompt,
@@ -412,6 +414,7 @@ function buildSessionBreakdown(session: RuntimeSession) {
   return {
     sessionId: session.id,
     task: session.task,
+    prompt: session.prompt ?? session.task,
     status: session.status,
     tokenUsage: {
       prompt: promptTokens,
@@ -546,15 +549,34 @@ function setupIpcHandlers(): void {
 
     const sessionId = randomUUID();
     const now = new Date().toISOString();
-    dashboardSessions.unshift({
+    const promptTokensEstimate = estimatePromptTokens(task);
+    const session: RuntimeSession = {
       id: sessionId,
       task,
+      prompt: task,
       startTime: now,
       lastUpdateTime: now,
       status: 'in_progress',
       success: false,
-      logs: [],
-    });
+      logs: [
+        {
+          timestamp: now,
+          type: 'event',
+          agentId: sessionId,
+          payload: {
+            event: 'run_started',
+            prompt: task,
+            promptChars: task.length,
+            estimatedPromptTokens: promptTokensEstimate,
+            provider: appConfig.provider,
+            model: appConfig.model,
+            runtimeProfile: appConfig.runtimeProfile,
+            workspaceRoot: currentWorkspace,
+          },
+        },
+      ],
+    };
+    dashboardSessions.unshift(session);
     activeSessionId = sessionId;
     saveDashboardSessions();
     broadcastDashboardSnapshot();
@@ -663,6 +685,12 @@ function setupIpcHandlers(): void {
       return { success: false, error: err.message };
     }
   });
+}
+
+function estimatePromptTokens(text: string): number {
+  const normalized = text.trim();
+  if (!normalized) return 0;
+  return Math.max(1, Math.ceil(normalized.length / 4));
 }
 
 function createWindow(): void {

@@ -142,7 +142,7 @@ export async function runOpenAIAgent(task: string, config: OpenAIAgentConfig) {
   }, (event) => {
     emit({
       type: 'llm',
-      content: `${event.model}: ${event.usage.totalTokens} tokens`,
+      content: `${event.model}: ${event.usage.totalTokens} tokens (${event.latencyMs}ms)`,
       metadata: {
         provider: event.provider,
         model: event.model,
@@ -180,6 +180,7 @@ export async function runOpenAIAgent(task: string, config: OpenAIAgentConfig) {
   });
 
   let result;
+  const taskStartedAt = Date.now();
   try {
     result = await runner.run(plannerAgent, task, {
       maxTurns: profile.maxTurns,
@@ -191,12 +192,18 @@ export async function runOpenAIAgent(task: string, config: OpenAIAgentConfig) {
     throw error;
   }
 
+  const taskDurationMs = Date.now() - taskStartedAt;
   const content = extractFinalContent(result);
-  emit({ type: 'message', content });
+  const usage = (result as any).usage;
+  const usageText = usage
+    ? `\n\n---\nUso: ${usage.totalTokens || usage.outputTokens + usage.inputTokens || 0} tokens | Tempo: ${Math.round(taskDurationMs / 1000)}s`
+    : `\n\n---\nTempo: ${Math.round(taskDurationMs / 1000)}s`;
+
+  emit({ type: 'message', content: content + usageText });
   return result;
 }
 
-function extractFinalContent(result: any): string {
+export function extractFinalContent(result: any): string {
   const cleanupOutput = (text: string): string =>
     text
       .replace(/<\|[a-z_]+\|>/gi, '')
@@ -207,15 +214,16 @@ function extractFinalContent(result: any): string {
 
   try {
     const finalOutput = result.finalOutput;
-    if (typeof finalOutput === 'string') return cleanupOutput(finalOutput);
-    if (finalOutput) return cleanupOutput(JSON.stringify(finalOutput, null, 2));
+    const normalized = normalizeCompletionPayload(finalOutput);
+    if (normalized) return cleanupOutput(normalized);
   } catch {
     // Keep fallback path.
   }
 
   try {
     const allText = extractAllTextOutput(result.newItems);
-    if (allText) return cleanupOutput(allText);
+    const normalized = normalizeCompletionPayload(allText);
+    if (normalized) return cleanupOutput(normalized);
   } catch {
     // Keep fallback path.
   }
@@ -230,4 +238,48 @@ function extractFinalContent(result: any): string {
     return `Executou ${toolOutputs.length} operacoes com ferramentas.`;
   }
   return 'Finalizado sem conteudo retornado.';
+}
+
+function normalizeCompletionPayload(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const parsed = parseJsonIfPossible(trimmed);
+    if (parsed !== null) {
+      return normalizeCompletionPayload(parsed);
+    }
+
+    return trimmed;
+  }
+
+  if (typeof value === 'object') {
+    const payload = value as Record<string, unknown>;
+    if (typeof payload.summary === 'string' && payload.summary.trim()) {
+      return payload.summary.trim();
+    }
+
+    if (payload.result !== undefined) {
+      const normalized = normalizeCompletionPayload(payload.result);
+      if (normalized) return normalized;
+    }
+
+    return JSON.stringify(value, null, 2);
+  }
+
+  return String(value);
+}
+
+function parseJsonIfPossible(text: string): unknown | null {
+  if (!((text.startsWith('{') && text.endsWith('}')) || (text.startsWith('[') && text.endsWith(']')))) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }

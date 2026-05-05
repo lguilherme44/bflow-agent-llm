@@ -33,7 +33,7 @@ function App(): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<'history' | 'tools' | 'mcp' | 'files'>('history')
   const [isSidebarOpen, setIsSidebarOpen] = useState(true)
 
-  const { messages, toolCalls, isRunning, thinking, runAgent, stopAgent, startNewSession, loadSession } = useAgent(api)
+  const { messages, toolCalls, isRunning, thinking, runStats, runAgent, stopAgent, startNewSession, loadSession } = useAgent(api)
 
   // Load config and workspace on mount
   useEffect(() => {
@@ -44,6 +44,10 @@ function App(): React.JSX.Element {
   const modelName = (config.model as string) || 'local-model'
   const providerName = (config.provider as string) || 'lmstudio'
   const workspaceName = workspace ? workspace.split(/[\\/]/).pop() : '—'
+  const elapsedSeconds = Math.round(runStats.elapsedMs / 1000)
+  const tokenLabel = runStats.totalTokens > 0
+    ? `${runStats.totalTokens.toLocaleString()} tokens`
+    : `~${runStats.promptTokens.toLocaleString()} prompt tokens`
 
   return (
     <div className="app">
@@ -145,7 +149,16 @@ function App(): React.JSX.Element {
         </div>
         <div className="statusbar__section">
           <div className="statusbar__item">
-            <span>⬡ 0 tokens</span>
+            <span>{isRunning ? 'Executando' : 'Pronto'}</span>
+          </div>
+          <div className="statusbar__item">
+            <span>{tokenLabel}</span>
+          </div>
+          <div className="statusbar__item">
+            <span>{elapsedSeconds}s</span>
+          </div>
+          <div className="statusbar__item">
+            <span>{runStats.llmCalls} chamadas LLM</span>
           </div>
         </div>
       </div>

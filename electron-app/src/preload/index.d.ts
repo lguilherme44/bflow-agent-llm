@@ -10,7 +10,7 @@ interface AgentAPI {
   connectMcp: (name: string) => Promise<any>
   disconnectMcp: (name: string) => Promise<any>
   syncModels: (baseUrl: string, apiKey?: string) => Promise<{ success: boolean; models?: string[]; error?: string }>
-  runAgent: (task: string) => Promise<{ success: boolean; error?: string }>
+  runAgent: (task: string) => Promise<{ success: boolean; sessionId?: string; error?: string }>
   stopAgent: () => Promise<{ success: boolean; error?: string }>
   onAgentEvent: (callback: (event: unknown) => void) => () => void
   loadHistory: () => Promise<any[]>

@@ -20,6 +20,7 @@ export interface SessionMetadata {
   startTime: string;
   lastUpdateTime: string;
   task: string;
+  prompt?: string;
   status: 'completed' | 'error' | 'in_progress';
   tokenUsage: number;
   promptTokens: number;
@@ -42,6 +43,7 @@ interface LogEntry {
 export interface SessionBreakdown {
   sessionId: string;
   task: string;
+  prompt?: string;
   status: string;
   tokenUsage: { prompt: number; completion: number; total: number };
   estimatedCostUsd: number;
