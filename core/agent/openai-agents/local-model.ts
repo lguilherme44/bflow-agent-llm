@@ -1,155 +1,127 @@
 import OpenAI from 'openai';
 import { randomUUID } from 'node:crypto';
 
+export interface LocalModelEvent {
+  provider: string;
+  model: string;
+  usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  };
+  latencyMs: number;
+  requestMessages: number;
+}
+
+export interface LocalModelOptions {
+  provider?: string;
+  maxOutputTokens?: number;
+  maxInputChars?: number;
+  maxToolOutputChars?: number;
+  temperature?: number;
+  onModelEvent?: (event: LocalModelEvent) => void;
+}
+
 /**
- * Modelo adaptado para modelos locais que não suportam tool_calls nativo.
- * 
- * Modelos como Qwen2.5-Coder e DeepSeek no Ollama/LM Studio frequentemente
- * retornam a chamada de ferramenta dentro do `content` como JSON em vez de
- * usar o campo `tool_calls` da API. Este wrapper intercepta a resposta e
- * converte automaticamente o JSON do content em tool_calls.
- * 
- * Fluxo:
- * 1. Envia request normalmente com tools via Chat Completions API
- * 2. Se a resposta tiver tool_calls, retorna normalmente
- * 3. Se não, tenta extrair JSON de tool call do content
- * 4. Se encontrar, converte para tool_calls e re-envia como se fosse nativo
+ * OpenAI-compatible model adapter tuned for local coding models.
+ *
+ * Ollama, LM Studio and MLX OpenAI-compatible servers frequently return tool
+ * calls as JSON inside message content. This adapter normalizes those calls
+ * into the Agents SDK function_call shape and caps context/tool output to keep
+ * 7B/8B models stable on low VRAM.
  */
 export class LocalToolCallingModel {
-  private client: OpenAI;
-  private model: string;
-  private toolSchemas: Map<string, any> = new Map();
+  private readonly toolSchemas: Map<string, any> = new Map();
 
-  constructor(client: OpenAI, model: string) {
-    this.client = client;
-    this.model = model;
-  }
+  constructor(
+    private readonly client: OpenAI,
+    private readonly model: string,
+    private readonly options: LocalModelOptions = {}
+  ) {}
 
-  /**
-   * Implementa a interface Model do @openai/agents
-   */
   getRetryAdvice() {
     return undefined;
   }
 
   async getResponse(request: any): Promise<any> {
-    // Construir mensagens no formato OpenAI
-    const messages = this.buildMessages(request);
+    const messages = this.trimMessagesToBudget(this.buildMessages(request));
     const tools = this.buildTools(request);
 
-    // Salvar schemas para validação
     if (tools) {
       for (const t of tools) {
         const fn = (t as any).function;
-        if (fn) {
-          this.toolSchemas.set(fn.name, fn.parameters);
-        }
+        if (fn) this.toolSchemas.set(fn.name, fn.parameters);
       }
     }
 
-    // Debug: ver o que está sendo enviado
     const debug = process.env.AGENT_DEBUG === '1';
     if (debug) {
-      console.error(`[LocalModel] === REQUEST ===`);
-      console.error(`[LocalModel] input type: ${typeof request.input}, isArray: ${Array.isArray(request.input)}`);
-      if (Array.isArray(request.input)) {
-        for (const item of request.input) {
-          console.error(`[LocalModel]   item.type=${item.type} item.role=${item.role || '-'} callId=${item.callId || '-'} name=${item.name || '-'}`);
-          if (item.output) console.error(`[LocalModel]     output: ${JSON.stringify(item.output).slice(0, 200)}`);
-        }
-      }
-      console.error(`[LocalModel] Msgs construídas: ${messages.length}, Tools: ${tools?.length ?? 0}`);
-      for (const m of messages) {
-        console.error(`[LocalModel]   msg role=${m.role} content=${JSON.stringify((m as any).content).slice(0, 150)}`);
-      }
+      console.error('[LocalModel] request', {
+        model: this.model,
+        messages: messages.length,
+        tools: tools?.length ?? 0,
+        maxInputChars: this.options.maxInputChars,
+        maxToolOutputChars: this.options.maxToolOutputChars,
+      });
     }
 
-    const completion = await this.client.chat.completions.create({
+    const startedAt = Date.now();
+    const completion = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        messages,
+        tools: tools && tools.length > 0 ? tools : undefined,
+        temperature: request.modelSettings?.temperature ?? this.options.temperature ?? 0.1,
+        max_tokens: request.modelSettings?.maxTokens ?? this.options.maxOutputTokens ?? 1536,
+      },
+      request.signal ? { signal: request.signal } : undefined
+    );
+
+    this.options.onModelEvent?.({
+      provider: this.options.provider ?? 'local',
       model: this.model,
-      messages,
-      tools: tools && tools.length > 0 ? tools : undefined,
-      temperature: request.modelSettings?.temperature ?? 0.1,
-      max_tokens: request.modelSettings?.maxTokens ?? 2048,
+      usage: {
+        promptTokens: completion.usage?.prompt_tokens ?? 0,
+        completionTokens: completion.usage?.completion_tokens ?? 0,
+        totalTokens: completion.usage?.total_tokens ?? 0,
+      },
+      latencyMs: Date.now() - startedAt,
+      requestMessages: messages.length,
     });
 
     const choice = completion.choices[0];
-    if (!choice) {
-      if (debug) console.error('[LocalModel] Sem choices na resposta');
-      return this.createEmptyResponse(completion);
-    }
+    if (!choice) return this.createEmptyResponse(completion);
 
     if (debug) {
-      console.error(`[LocalModel] finish_reason: ${choice.finish_reason}`);
-      console.error(`[LocalModel] content: ${JSON.stringify(choice.message.content).slice(0, 300)}`);
-      console.error(`[LocalModel] tool_calls: ${JSON.stringify(choice.message.tool_calls)}`);
+      console.error('[LocalModel] response', {
+        finishReason: choice.finish_reason,
+        hasToolCalls: Boolean(choice.message.tool_calls?.length),
+        contentPreview: String(choice.message.content ?? '').slice(0, 240),
+      });
     }
 
-    // Se já tem tool_calls nativas, converter para formato do SDK
     if (choice.message.tool_calls && choice.message.tool_calls.length > 0) {
-      if (debug) console.error('[LocalModel] → Usando tool_calls nativas');
-
-      // Interceptar complete_task para parar o loop
-      const completeTaskCall = choice.message.tool_calls.find((tc: any) => tc.function?.name === 'complete_task');
-      if (completeTaskCall) {
-        if (debug) console.error('[LocalModel] → Interceptando complete_task nativo, retornando como texto final.');
-        let finalMessage = 'Tarefa concluída.';
-        try {
-          const args = JSON.parse((completeTaskCall as any).function.arguments || '{}');
-          const values = Object.values(args);
-          if (values.length > 0) {
-            finalMessage = values.map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join('\n');
-          }
-        } catch {}
-        return this.convertTextResponse(finalMessage, completion);
-      }
-
       return this.convertNativeToolCalls(choice, completion);
     }
 
-    // Tentar extrair tool call do content
     const content = choice.message.content || '';
     const extractedCall = this.extractToolCallFromContent(content);
-
     if (extractedCall && this.toolSchemas.has(extractedCall.name)) {
-      if (debug) console.error(`[LocalModel] → Extraiu tool call do content: ${extractedCall.name}(${JSON.stringify(extractedCall.arguments)})`);
-
-      // Interceptar complete_task para parar o loop
-      if (extractedCall.name === 'complete_task') {
-        if (debug) console.error('[LocalModel] → Interceptando complete_task extraído, retornando como texto final.');
-        let finalMessage = 'Tarefa concluída.';
-        if (extractedCall.arguments) {
-          if (typeof extractedCall.arguments === 'object') {
-            const values = Object.values(extractedCall.arguments);
-            if (values.length > 0) {
-              finalMessage = values.map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join('\n');
-            }
-          } else {
-            finalMessage = String(extractedCall.arguments);
-          }
-        }
-        return this.convertTextResponse(finalMessage, completion);
-      }
-
       return this.convertExtractedToolCall(extractedCall, completion);
     }
 
-    // Resposta de texto normal
-    if (debug) console.error(`[LocalModel] → Texto normal: ${content.slice(0, 100)}`);
     return this.convertTextResponse(content, completion);
   }
 
   async *getStreamedResponse(request: any): AsyncIterable<any> {
-    // Para modelos locais, streaming não é crítico — usar non-streaming
+    yield { type: 'response_started' };
     const response = await this.getResponse(request);
-    yield response;
+    yield { type: 'response_done', response };
   }
-
-  // ── Conversão de formatos ─────────────────────────────────────
 
   private convertNativeToolCalls(choice: any, completion: any) {
     const output: any[] = [];
 
-    // Adicionar texto do assistente se houver
     if (choice.message.content) {
       const cleaned = this.cleanSpecialTokens(choice.message.content);
       if (cleaned) {
@@ -163,8 +135,8 @@ export class LocalToolCallingModel {
       }
     }
 
-    // Converter tool_calls
     for (const tc of choice.message.tool_calls) {
+      const callId = tc.id || randomUUID();
       let args: Record<string, any> = {};
       try {
         args = JSON.parse(tc.function.arguments || '{}');
@@ -173,9 +145,9 @@ export class LocalToolCallingModel {
       }
 
       output.push({
-        id: tc.id || randomUUID(),
+        id: callId,
         type: 'function_call',
-        callId: tc.id || randomUUID(),
+        callId,
         name: tc.function.name,
         arguments: JSON.stringify(args),
         status: 'completed',
@@ -240,83 +212,91 @@ export class LocalToolCallingModel {
     };
   }
 
-  // ── Extração de tool calls do content ─────────────────────────
-
-  /**
-   * Tenta extrair uma chamada de ferramenta do content textual.
-   * 
-   * Suporta formatos comuns de modelos locais:
-   * - {"name": "tool_name", "arguments": {...}}
-   * - {"name": "tool_name", "parameters": {...}}
-   * - {"tool": "tool_name", "arguments": {...}}
-   * - <tool_call>{"name": "tool_name", ...}</tool_call>
-   * - </think>\n{"name": "tool_name", ...}  (DeepSeek R1)
-   */
   private extractToolCallFromContent(content: string): { name: string; arguments: Record<string, any> } | null {
     if (!content || content.trim().length === 0) return null;
 
-    // Limpar tags especiais
-    let cleaned = content
-      .replace(/<\|[a-z_]+\|>/gi, '')           // <|im_start|> etc
-      .replace(/<\/?(think|tool_call)>/gi, '')   // <think>, </think>, <tool_call>
-      .trim();
-
-    // Tentar encontrar o JSON
+    const cleaned = this.cleanSpecialTokens(content);
     const jsonStr = this.extractJson(cleaned);
     if (!jsonStr) return null;
 
     try {
       const parsed = JSON.parse(jsonStr);
-
-      // Formato: {"name": "tool", "arguments": {...}}
-      if (typeof parsed.name === 'string' && this.toolSchemas.has(parsed.name)) {
-        return {
-          name: parsed.name,
-          arguments: parsed.arguments || parsed.parameters || {},
-        };
-      }
-
-      // Formato: {"tool": "tool_name", "arguments": {...}}
-      if (typeof parsed.tool === 'string' && this.toolSchemas.has(parsed.tool)) {
-        return {
-          name: parsed.tool,
-          arguments: parsed.arguments || parsed.parameters || {},
-        };
-      }
-
-      // Formato: {"tool_name": {"arg": "value"}} — menos comum
-      for (const key of Object.keys(parsed)) {
-        if (this.toolSchemas.has(key) && typeof parsed[key] === 'object') {
-          return { name: key, arguments: parsed[key] };
-        }
-      }
+      return this.normalizeToolCallJson(parsed);
     } catch {
-      // JSON inválido — ignorar
+      return null;
+    }
+  }
+
+  private normalizeToolCallJson(parsed: any): { name: string; arguments: Record<string, any> } | null {
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        const normalized = this.normalizeToolCallJson(item);
+        if (normalized) return normalized;
+      }
+      return null;
+    }
+
+    if (!parsed || typeof parsed !== 'object') return null;
+
+    if (Array.isArray(parsed.tool_calls)) {
+      return this.normalizeToolCallJson(parsed.tool_calls);
+    }
+
+    const functionPayload = parsed.function && typeof parsed.function === 'object' ? parsed.function : undefined;
+    const directName = parsed.name ?? parsed.tool ?? functionPayload?.name;
+    if (typeof directName === 'string' && this.toolSchemas.has(directName)) {
+      const args = parsed.arguments ?? parsed.parameters ?? functionPayload?.arguments ?? {};
+      return {
+        name: directName,
+        arguments: this.normalizeArguments(args),
+      };
+    }
+
+    for (const key of Object.keys(parsed)) {
+      if (this.toolSchemas.has(key) && typeof parsed[key] === 'object') {
+        return { name: key, arguments: this.normalizeArguments(parsed[key]) };
+      }
     }
 
     return null;
+  }
+
+  private normalizeArguments(args: unknown): Record<string, any> {
+    if (!args) return {};
+    if (typeof args === 'string') {
+      try {
+        const parsed = JSON.parse(args);
+        return parsed && typeof parsed === 'object' ? parsed : {};
+      } catch {
+        return {};
+      }
+    }
+    return typeof args === 'object' ? args as Record<string, any> : {};
   }
 
   private extractJson(text: string): string | null {
-    // Bloco de código
     const fenced = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
     if (fenced?.[1]?.trim()) return fenced[1].trim();
 
-    // JSON direto
     const trimmed = text.trim();
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) return trimmed;
+    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+      return trimmed;
+    }
 
-    // JSON embutido no texto
-    const start = text.indexOf('{');
-    const end = text.lastIndexOf('}');
-    if (start >= 0 && end > start) {
-      return text.slice(start, end + 1);
+    const objectStart = text.indexOf('{');
+    const objectEnd = text.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      return text.slice(objectStart, objectEnd + 1);
+    }
+
+    const arrayStart = text.indexOf('[');
+    const arrayEnd = text.lastIndexOf(']');
+    if (arrayStart >= 0 && arrayEnd > arrayStart) {
+      return text.slice(arrayStart, arrayEnd + 1);
     }
 
     return null;
   }
-
-  // ── Helpers ───────────────────────────────────────────────────
 
   private cleanSpecialTokens(text: string): string {
     return text
@@ -340,71 +320,121 @@ export class LocalToolCallingModel {
   private buildMessages(request: any): OpenAI.ChatCompletionMessageParam[] {
     const messages: OpenAI.ChatCompletionMessageParam[] = [];
 
-    // System prompt
     if (request.systemInstructions) {
       messages.push({ role: 'system', content: request.systemInstructions });
     }
 
-    // Converter input do SDK para mensagens
-    if (request.input) {
-      if (typeof request.input === 'string') {
-        messages.push({ role: 'user', content: request.input });
-      } else if (Array.isArray(request.input)) {
-        for (const item of request.input) {
-          if (item.type === 'message' && item.role) {
-            let textContent = '';
-            if (typeof item.content === 'string') {
-              textContent = item.content;
-            } else if (Array.isArray(item.content)) {
-              textContent = item.content
-                .filter((c: any) => c.type === 'input_text' || c.type === 'output_text' || c.type === 'text')
-                .map((c: any) => c.text || c.value || '')
-                .join('\n');
-            }
-            if (textContent) {
-              messages.push({
-                role: item.role === 'user' ? 'user' : 'assistant',
-                content: textContent,
-              });
-            }
-          } else if (item.type === 'function_call') {
-            messages.push({
-              role: 'assistant',
-              content: null,
-              tool_calls: [{
-                id: item.callId || item.id,
-                type: 'function' as const,
-                function: { name: item.name, arguments: item.arguments || '{}' },
-              }],
-            });
-          } else if (item.type === 'function_call_output' || item.type === 'function_call_result') {
-            // Extrair o texto do output (pode ser string, objeto, ou {type:'text', text:'...'})
-            let outputText = '';
-            if (typeof item.output === 'string') {
-              outputText = item.output;
-            } else if (item.output && typeof item.output === 'object') {
-              if (item.output.type === 'text' && item.output.text) {
-                outputText = item.output.text;
-              } else {
-                outputText = JSON.stringify(item.output);
-              }
-            }
-            // Truncar output para evitar estouro de contexto em modelos locais
-            const MAX_TOOL_OUTPUT = 3000;
-            if (outputText.length > MAX_TOOL_OUTPUT) {
-              outputText = outputText.slice(0, MAX_TOOL_OUTPUT) + '\n\n[... truncado. Use ranges de linha ou filtros para ver mais.]';
-            }
-            messages.push({
-              role: 'tool',
-              tool_call_id: item.callId || item.id,
-              content: outputText || '{}',
-            });
-          }
+    if (!request.input) return messages;
+
+    if (typeof request.input === 'string') {
+      messages.push({ role: 'user', content: request.input });
+      return messages;
+    }
+
+    if (!Array.isArray(request.input)) return messages;
+
+    for (const item of request.input) {
+      if (item.type === 'message' && item.role) {
+        const textContent = this.extractMessageText(item.content);
+        if (textContent) {
+          messages.push({
+            role: item.role === 'user' ? 'user' : 'assistant',
+            content: textContent,
+          });
         }
+      } else if (item.type === 'function_call') {
+        messages.push({
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: item.callId || item.id,
+              type: 'function' as const,
+              function: { name: item.name, arguments: item.arguments || '{}' },
+            },
+          ],
+        });
+      } else if (item.type === 'function_call_output' || item.type === 'function_call_result') {
+        messages.push({
+          role: 'tool',
+          tool_call_id: item.callId || item.id,
+          content: this.truncateToolOutput(this.extractToolOutputText(item.output)),
+        });
       }
     }
 
     return messages;
+  }
+
+  private extractMessageText(content: unknown): string {
+    if (typeof content === 'string') return content;
+    if (!Array.isArray(content)) return '';
+    return content
+      .filter((c: any) => c.type === 'input_text' || c.type === 'output_text' || c.type === 'text')
+      .map((c: any) => c.text || c.value || '')
+      .join('\n');
+  }
+
+  private extractToolOutputText(output: unknown): string {
+    if (typeof output === 'string') return output;
+    if (output && typeof output === 'object') {
+      if ((output as any).type === 'text' && (output as any).text) {
+        return (output as any).text;
+      }
+      return JSON.stringify(output);
+    }
+    return '{}';
+  }
+
+  private truncateToolOutput(outputText: string): string {
+    const maxChars = this.options.maxToolOutputChars ?? 3000;
+    if (outputText.length <= maxChars) return outputText || '{}';
+    return `${outputText.slice(0, maxChars)}\n\n[... truncated. Use line ranges, filters or narrower searches for more.]`;
+  }
+
+  private trimMessagesToBudget(messages: OpenAI.ChatCompletionMessageParam[]): OpenAI.ChatCompletionMessageParam[] {
+    const maxChars = this.options.maxInputChars;
+    if (!maxChars || maxChars <= 0) return messages;
+
+    let total = this.countMessageChars(messages);
+    if (total <= maxChars) return messages;
+
+    const systemMessages = messages.filter((message) => message.role === 'system');
+    const conversation = messages.filter((message) => message.role !== 'system');
+    let omitted = 0;
+
+    while (conversation.length > 1 && total > maxChars) {
+      const removed = conversation.shift();
+      if (!removed) break;
+      omitted += 1;
+      total -= this.countMessageChars([removed]);
+    }
+
+    while (conversation[0]?.role === 'tool') {
+      const removed = conversation.shift();
+      if (!removed) break;
+      omitted += 1;
+    }
+
+    const budgetNotice: OpenAI.ChatCompletionMessageParam[] = omitted > 0
+      ? [{
+          role: 'system',
+          content: `Local context budget active: ${omitted} older message(s) were omitted. Re-read files with tools when needed.`,
+        }]
+      : [];
+
+    return [...systemMessages, ...budgetNotice, ...conversation];
+  }
+
+  private countMessageChars(messages: OpenAI.ChatCompletionMessageParam[]): number {
+    return messages.reduce((total, message) => total + this.messageToText(message).length + 64, 0);
+  }
+
+  private messageToText(message: OpenAI.ChatCompletionMessageParam): string {
+    const content = (message as any).content;
+    if (typeof content === 'string') return content;
+    if (content === null || content === undefined) return JSON.stringify(message);
+    return JSON.stringify(content);
   }
 
   private buildTools(request: any): OpenAI.ChatCompletionTool[] | undefined {

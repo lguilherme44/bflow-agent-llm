@@ -14,6 +14,12 @@ import { TerminalOutputParser } from '../../utils/terminal-output-parser.js';
 
 export function createOpenAITools(options?: DevelopmentToolOptions) {
   const workspaceRoot = options?.workspaceRoot ?? process.cwd();
+  const limits = options?.runtimeLimits ?? {
+    maxFileLines: 260,
+    maxListFiles: 400,
+    maxSearchMatches: 80,
+    maxRagResults: 8,
+  };
   const parser = options?.parserService ?? new TreeSitterParserService();
   const astGrep = options?.astGrepService ?? new AstGrepService();
   const tsService = options?.tsLanguageService ?? new TypeScriptLanguageService(workspaceRoot);
@@ -22,6 +28,34 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
   const rag = options?.ragService ?? new LocalRagService(workspaceRoot, parser);
   const git = options?.gitService ?? new GitService(terminal);
 
+  const instrument = <TArgs, TResult>(
+    toolName: string,
+    execute: (args: TArgs) => Promise<TResult> | TResult
+  ) => async (args: TArgs): Promise<TResult> => {
+    const startedAt = Date.now();
+    options?.onToolEvent?.({ type: 'tool_call', tool: toolName, args });
+    try {
+      const result = await execute(args);
+      options?.onToolEvent?.({
+        type: 'tool_result',
+        tool: toolName,
+        result,
+        success: isSuccessfulToolResult(result),
+        durationMs: Date.now() - startedAt,
+      });
+      return result;
+    } catch (error) {
+      options?.onToolEvent?.({
+        type: 'tool_result',
+        tool: toolName,
+        result: { error: error instanceof Error ? error.message : String(error) },
+        success: false,
+        durationMs: Date.now() - startedAt,
+      });
+      throw error;
+    }
+  };
+
   // ── read_file (completo com AST) ─────────────────────────────
   const readFileTool = tool({
     name: 'read_file',
@@ -29,7 +63,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
     parameters: z.object({
       filepath: z.string().min(1).describe('Relative path to the file'),
     }),
-    execute: async ({ filepath }: { filepath: string }) => editing.readFileWithAst(filepath),
+    execute: instrument('read_file', async ({ filepath }: { filepath: string }) => editing.readFileWithAst(filepath)),
   });
 
   // ── read_file_compact (leve, só texto) ──────────────────────
@@ -42,7 +76,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       startLine: z.number().int().min(1).optional().describe('First line to read (1-indexed)'),
       endLine: z.number().int().min(1).optional().describe('Last line to read (1-indexed)'),
     }),
-    execute: async ({ filepath, startLine, endLine }: { filepath: string; startLine?: number; endLine?: number }) => {
+    execute: instrument('read_file_compact', async ({ filepath, startLine, endLine }: { filepath: string; startLine?: number; endLine?: number }) => {
       const resolved = path.resolve(workspaceRoot, filepath);
       // Segurança: impedir leitura fora do workspace
       if (!resolved.startsWith(path.resolve(workspaceRoot))) {
@@ -65,7 +99,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       }
 
       // Se o arquivo for grande, truncar para economizar contexto
-      const MAX_LINES = 300;
+      const MAX_LINES = limits.maxFileLines;
       if (totalLines > MAX_LINES) {
         return {
           filepath,
@@ -77,7 +111,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       }
 
       return { filepath, totalLines, content };
-    },
+    }),
   });
 
   // ── list_files ───────────────────────────────────────────────
@@ -88,9 +122,9 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       directory: z.string().default('.'),
       extensions: z.array(z.string()).optional(),
     }),
-    execute: async ({ directory, extensions }: { directory: string; extensions?: string[] }) => ({
-      files: await listFiles(workspaceRoot, directory, extensions),
-    }),
+    execute: instrument('list_files', async ({ directory, extensions }: { directory: string; extensions?: string[] }) => ({
+      files: await listFiles(workspaceRoot, directory, extensions, { maxFiles: limits.maxListFiles }),
+    })),
   });
 
   // ── search_text ──────────────────────────────────────────────
@@ -101,9 +135,12 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       query: z.string().min(1),
       directory: z.string().default('.'),
     }),
-    execute: async ({ query, directory }: { query: string; directory: string }) => ({
-      matches: await searchText(workspaceRoot, query, directory),
-    }),
+    execute: instrument('search_text', async ({ query, directory }: { query: string; directory: string }) => ({
+      matches: await searchText(workspaceRoot, query, directory, {
+        maxFiles: limits.maxListFiles,
+        maxMatches: limits.maxSearchMatches,
+      }),
+    })),
   });
 
   // ── execute_command ──────────────────────────────────────────
@@ -114,8 +151,8 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       command: z.string().min(1),
       cwd: z.string().default('.'),
     }),
-    execute: async ({ command, cwd }: { command: string; cwd: string }) =>
-      terminal.executeCommand(command, cwd),
+    execute: instrument('execute_command', async ({ command, cwd }: { command: string; cwd: string }) =>
+      terminal.executeCommand(command, cwd)),
   });
 
   // ── create_file ──────────────────────────────────────────────
@@ -126,8 +163,8 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       filepath: z.string().min(1),
       content: z.string(),
     }),
-    execute: async ({ filepath, content }: { filepath: string; content: string }) =>
-      editing.createFile(filepath, content),
+    execute: instrument('create_file', async ({ filepath, content }: { filepath: string; content: string }) =>
+      editing.createFile(filepath, content)),
   });
 
   // ── edit_file ────────────────────────────────────────────────
@@ -140,7 +177,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       target: z.string().min(1).describe('Exact string to find and replace (must match exactly)'),
       replacement: z.string().describe('The new content to replace the target with'),
     }),
-    execute: async ({ filepath, target, replacement }: { filepath: string; target: string; replacement: string }) => {
+    execute: instrument('edit_file', async ({ filepath, target, replacement }: { filepath: string; target: string; replacement: string }) => {
       const resolved = path.resolve(workspaceRoot, filepath);
       if (!resolved.startsWith(path.resolve(workspaceRoot))) {
         return { error: 'Path is outside the workspace.' };
@@ -166,7 +203,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       } catch (err) {
         return { error: `Failed to edit ${filepath}: ${err instanceof Error ? err.message : String(err)}` };
       }
-    },
+    }),
   });
 
   // ── complete_task ────────────────────────────────────────────
@@ -177,9 +214,9 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       status: z.enum(['success', 'failure']),
       summary: z.string().min(1),
     }),
-    execute: async (args: { status: 'success' | 'failure'; summary: string }) => {
+    execute: instrument('complete_task', async (args: { status: 'success' | 'failure'; summary: string }) => {
       return { completed: true, status: args.status, summary: args.summary };
-    },
+    }),
   });
 
   // ── retrieve_context ─────────────────────────────────────────
@@ -191,10 +228,10 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       directory: z.string().default('.'),
       limit: z.number().int().min(1).max(20).default(8),
     }),
-    execute: async ({ task, directory, limit }) => {
+    execute: instrument('retrieve_context', async ({ task, directory, limit }) => {
       await rag.indexWorkspace(directory);
-      return rag.retrieveHybrid({ task, limit });
-    },
+      return rag.retrieveHybrid({ task, limit: Math.min(limit, limits.maxRagResults) });
+    }),
   });
 
   // ── rename_symbol ────────────────────────────────────────────
@@ -207,13 +244,13 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       column: z.number().int().min(0),
       newName: z.string().min(1),
     }),
-    execute: async ({ filepath, line, column, newName }) => {
+    execute: instrument('rename_symbol', async ({ filepath, line, column, newName }) => {
       return editing.createRenamePlan({
         filepath,
         position: { line, column },
         newName,
       });
-    },
+    }),
   });
 
   // ── find_references ──────────────────────────────────────────
@@ -225,9 +262,9 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
       line: z.number().int().min(1),
       column: z.number().int().min(0),
     }),
-    execute: async ({ filepath, line, column }) => {
+    execute: instrument('find_references', async ({ filepath, line, column }) => {
       return editing.findReferences(filepath, { line, column });
-    },
+    }),
   });
 
   // ── run_tests ────────────────────────────────────────────────
@@ -235,7 +272,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
     name: 'run_tests',
     description: 'Runs the configured npm test command. Use after code changes.',
     parameters: z.object({}),
-    execute: async () => {
+    execute: instrument('run_tests', async () => {
       const command = process.platform === 'win32' ? 'npm.cmd test' : 'npm test';
       const result = await terminal.executeCommand(command, '.');
       const failures = TerminalOutputParser.parseTestFailures(result.stdout, result.stderr);
@@ -247,7 +284,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
         relatedFiles,
         summary: failures.length > 0 ? `Failed ${failures.length} tests.` : 'All tests passed.'
       };
-    },
+    }),
   });
 
   // ── run_linter ───────────────────────────────────────────────
@@ -257,7 +294,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
     parameters: z.object({
       autoFix: z.boolean().default(false),
     }),
-    execute: async ({ autoFix }) => {
+    execute: instrument('run_linter', async ({ autoFix }) => {
       const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
       const command = autoFix ? `${npm} run lint -- --fix` : `${npm} run lint`;
       const beforeStatus = await git.getParsedStatus();
@@ -277,7 +314,7 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
         autoFixApplied: autoFix,
         fixedFiles,
       };
-    },
+    }),
   });
 
   // ── git_commit ───────────────────────────────────────────────
@@ -287,14 +324,14 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
     parameters: z.object({
       message: z.string().min(1),
     }),
-    execute: async ({ message }) => {
+    execute: instrument('git_commit', async ({ message }) => {
       // simplified without validation gate for now to match SDK scope
       const status = await git.getParsedStatus();
       if (status.length === 0) return { success: false, reason: 'No changes to commit' };
       
       await git.commit(message);
       return { success: true, message: `Committed ${status.length} files.` };
-    },
+    }),
   });
 
   return {
@@ -313,4 +350,11 @@ export function createOpenAITools(options?: DevelopmentToolOptions) {
     runLinterTool,
     gitCommitTool,
   };
+}
+
+function isSuccessfulToolResult(result: unknown): boolean {
+  if (!result || typeof result !== 'object') return true;
+  if ('error' in result) return false;
+  if ('success' in result && (result as { success?: unknown }).success === false) return false;
+  return true;
 }

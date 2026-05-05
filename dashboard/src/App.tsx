@@ -1,11 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { Overview } from './components/Overview';
 import { SessionList } from './components/SessionList';
 import { SessionDetail } from './components/SessionDetail';
 import { Traces } from './components/Traces';
 
-// Types
 export interface ProviderBreakdown {
   provider: string;
   model: string;
@@ -76,9 +75,10 @@ interface Stats {
   avgTokensPerSession: number;
 }
 
-const API_BASE = '/api';
+const WS_URL = ((import.meta as any).env?.VITE_BFLOW_WS_URL as string | undefined) ?? 'ws://localhost:3030';
 
 function App() {
+  const wsRef = useRef<WebSocket | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'sessions' | 'traces'>('overview');
   const [sessions, setSessions] = useState<SessionMetadata[]>([]);
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
@@ -86,40 +86,48 @@ function App() {
   const [sessionBreakdown, setSessionBreakdown] = useState<SessionBreakdown | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
 
-  const fetchData = useCallback(async () => {
-    try {
-      const [sessionsRes, statsRes] = await Promise.all([
-        fetch(`${API_BASE}/sessions`),
-        fetch(`${API_BASE}/metrics`)
-      ]);
-      const sessionsData = await sessionsRes.json();
-      const statsData = await statsRes.json();
-      setSessions(sessionsData);
-      setStats(statsData);
-    } catch (err) {
-      console.error('Error fetching data:', err);
+  const send = useCallback((payload: Record<string, unknown>) => {
+    const ws = wsRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(payload));
     }
   }, []);
 
-  useEffect(() => {
-    fetchData();
-    const interval = setInterval(fetchData, 10000);
+  const fetchData = useCallback(() => {
+    send({ type: 'dashboard:get_snapshot' });
+  }, [send]);
 
-    const ws = new WebSocket(`ws://localhost:3030`);
+  useEffect(() => {
+    const ws = new WebSocket(WS_URL);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      ws.send(JSON.stringify({ type: 'dashboard:get_snapshot' }));
+    };
 
     ws.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'agent_update') {
-          if (['phase_start', 'phase_complete', 'error'].includes(data.event.type)) {
-            fetchData();
-          }
+        if (data.type === 'dashboard:snapshot') {
+          setSessions(data.sessions || []);
+          setStats(data.stats || null);
+        } else if (data.type === 'dashboard:session') {
+          setSessionLogs(data.logs || []);
+          setSessionBreakdown(data.breakdown || null);
+          setSelectedSessionId(data.sessionId || null);
+        } else if (data.type === 'agent:event') {
+          ws.send(JSON.stringify({ type: 'dashboard:get_snapshot' }));
         }
       } catch (e) {
         console.error('WS parse error', e);
       }
     };
 
+    ws.onclose = () => {
+      if (wsRef.current === ws) wsRef.current = null;
+    };
+
+    const interval = setInterval(fetchData, 10000);
     return () => {
       clearInterval(interval);
       ws.close();
@@ -127,46 +135,26 @@ function App() {
   }, [fetchData]);
 
   const fetchSessionLogs = async (id: string) => {
-    try {
-      const [logsRes, breakdownRes] = await Promise.all([
-        fetch(`${API_BASE}/sessions/${id}`),
-        fetch(`${API_BASE}/sessions/${id}/breakdown`)
-      ]);
-      const logsData = await logsRes.json();
-      const breakdownData = await breakdownRes.json();
-      setSessionLogs(logsData);
-      setSessionBreakdown(breakdownData);
-      setSelectedSessionId(id);
-    } catch (err) {
-      console.error('Error fetching logs:', err);
-    }
+    send({ type: 'dashboard:get_session', sessionId: id });
   };
 
   const clearAllLogs = async () => {
-    if (window.confirm('Tem certeza que deseja apagar TODOS os logs? Esta ação é irreversível.')) {
-      try {
-        await fetch(`${API_BASE}/sessions`, { method: 'DELETE' });
-        setSessions([]);
-        setStats(null);
-        setSelectedSessionId(null);
-        setSessionBreakdown(null);
-      } catch (err) {
-        console.error('Error clearing logs:', err);
-      }
+    if (window.confirm('Tem certeza que deseja apagar TODOS os logs? Esta acao e irreversivel.')) {
+      send({ type: 'dashboard:clear_sessions' });
+      setSessions([]);
+      setStats(null);
+      setSelectedSessionId(null);
+      setSessionBreakdown(null);
     }
   };
 
   const deleteSession = async (id: string) => {
-    if (window.confirm(`Deseja realmente apagar a sessão ${id.slice(0, 8)}...?`)) {
-      try {
-        await fetch(`${API_BASE}/sessions/${id}`, { method: 'DELETE' });
-        setSessions(sessions.filter(s => s.id !== id));
-        if (selectedSessionId === id) {
-          setSelectedSessionId(null);
-          setSessionBreakdown(null);
-        }
-      } catch (err) {
-        console.error('Error deleting session:', err);
+    if (window.confirm(`Deseja realmente apagar a sessao ${id.slice(0, 8)}...?`)) {
+      send({ type: 'dashboard:delete_session', sessionId: id });
+      setSessions((current) => current.filter((session) => session.id !== id));
+      if (selectedSessionId === id) {
+        setSelectedSessionId(null);
+        setSessionBreakdown(null);
       }
     }
   };
@@ -174,8 +162,8 @@ function App() {
   const renderContent = () => {
     if (selectedSessionId) {
       return (
-        <SessionDetail 
-          sessionId={selectedSessionId} 
+        <SessionDetail
+          sessionId={selectedSessionId}
           logs={sessionLogs}
           breakdown={sessionBreakdown}
           onBack={() => { setSelectedSessionId(null); setSessionBreakdown(null); }}
@@ -188,13 +176,7 @@ function App() {
       case 'overview':
         return <Overview stats={stats} sessions={sessions} />;
       case 'sessions':
-        return (
-          <SessionList 
-            sessions={sessions} 
-            onSelect={fetchSessionLogs} 
-            onDelete={deleteSession} 
-          />
-        );
+        return <SessionList sessions={sessions} onSelect={fetchSessionLogs} onDelete={deleteSession} />;
       case 'traces':
         return <Traces />;
       default:
@@ -204,13 +186,13 @@ function App() {
 
   return (
     <div className="dashboard-container">
-      <Sidebar 
-        activeTab={activeTab} 
+      <Sidebar
+        activeTab={activeTab}
         onTabChange={(tab) => {
           setActiveTab(tab);
           setSelectedSessionId(null);
           setSessionBreakdown(null);
-        }} 
+        }}
         onClearLogs={clearAllLogs}
       />
 

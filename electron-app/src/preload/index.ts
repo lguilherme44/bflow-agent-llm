@@ -11,10 +11,13 @@ const agentAPI = {
 
   // Workspace
   getWorkspace: (): Promise<string> => ipcRenderer.invoke('workspace:get'),
+  openWorkspace: (): Promise<{ success: boolean; workspace: string }> => ipcRenderer.invoke('workspace:open'),
 
   // App info
   getVersion: (): Promise<string> => ipcRenderer.invoke('app:version'),
   getMcpStatus: (): Promise<any> => ipcRenderer.invoke('mcp:status'),
+  connectMcp: (name: string): Promise<any> => ipcRenderer.invoke('mcp:connect', name),
+  disconnectMcp: (name: string): Promise<any> => ipcRenderer.invoke('mcp:disconnect', name),
   syncModels: (baseUrl: string, apiKey?: string): Promise<{ success: boolean; models?: string[]; error?: string }> => 
     ipcRenderer.invoke('models:sync', baseUrl, apiKey),
 

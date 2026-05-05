@@ -3,6 +3,8 @@ export type { AgentEvent, AgentRunConfig } from './agent-runner.js';
 export { createSwarmAgents } from './agent/openai-agents/agents.js';
 export { createOpenAITools } from './agent/openai-agents/tools.js';
 export { runOpenAIAgent } from './agent/openai-agents/orchestrator.js';
+export { resolveLocalRuntimeProfile, LOCAL_RUNTIME_PROFILES } from './agent/openai-agents/runtime-profile.js';
+export type { LocalRuntimeProfile, LocalRuntimeProfileId } from './agent/openai-agents/runtime-profile.js';
 
 export { CodeEditingService } from './code/editing-service.js';
 export { TreeSitterParserService } from './code/tree-sitter-parser.js';

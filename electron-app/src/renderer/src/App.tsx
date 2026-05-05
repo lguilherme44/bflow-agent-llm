@@ -9,11 +9,14 @@ import { useAgent } from './hooks/useAgent'
 
 // Safe API access — fallback when running outside Electron (e.g. browser preview)
 const api = window.api ?? {
-  loadConfig: async () => ({ provider: 'lmstudio', model: 'local-model', baseUrl: 'http://localhost:1234/v1', maxTurns: 15 }),
+  loadConfig: async () => ({ provider: 'lmstudio', model: 'local-model', baseUrl: 'http://localhost:1234/v1', runtimeProfile: 'low-vram-8gb', maxTurns: 8 }),
   saveConfig: async () => ({ success: true }),
   getWorkspace: async () => 'workspace',
+  openWorkspace: async () => ({ success: true, workspace: 'workspace' }),
   getVersion: async () => '1.0.0',
   getMcpStatus: async () => ({ servers: [] }),
+  connectMcp: async () => ({ success: true, servers: [] }),
+  disconnectMcp: async () => ({ success: true, servers: [] }),
   syncModels: async (_baseUrl: string) => ({ success: true, models: ['mock-model'] }),
   runAgent: async (task: string) => { console.log('Mock runAgent:', task); return { success: true }; },
   stopAgent: async () => ({ success: true }),

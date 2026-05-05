@@ -7,16 +7,28 @@ import { JsonValue } from '../types/index.js';
  * Lists files in the workspace, excluding common non-source directories.
  * Capped at 500 files to avoid flooding the agent context.
  */
-export async function listFiles(workspaceRoot: string, directory: string, extensions?: string[]): Promise<string[]> {
+export interface FileSearchLimits {
+  maxFiles?: number;
+  maxMatches?: number;
+}
+
+export async function listFiles(
+  workspaceRoot: string,
+  directory: string,
+  extensions?: string[],
+  limits: FileSearchLimits = {}
+): Promise<string[]> {
   const root = assertInsideWorkspace(workspaceRoot, directory);
   const output: string[] = [];
+  const maxFiles = limits.maxFiles ?? 500;
   const ignored = new Set(['node_modules', 'dist', '.git', '.agent', '.agent-checkpoints', 'build', 'out']);
 
   async function walk(current: string): Promise<void> {
-    if (output.length > 500) return;
+    if (output.length >= maxFiles) return;
 
     const entries = await readdir(current, { withFileTypes: true });
     for (const entry of entries) {
+      if (output.length >= maxFiles) return;
       if (ignored.has(entry.name) || entry.name.startsWith('.')) {
         if (entry.name !== '.env' && entry.name !== '.gitignore') {
           continue;
@@ -33,23 +45,30 @@ export async function listFiles(workspaceRoot: string, directory: string, extens
   }
 
   await walk(root);
-  return output.sort().slice(0, 500);
+  return output.sort().slice(0, maxFiles);
 }
 
 /**
  * Searches workspace files for a literal text query.
  * Returns matching file paths, line numbers and previews, capped at 100 matches.
  */
-export async function searchText(workspaceRoot: string, query: string, directory: string): Promise<Array<Record<string, JsonValue>>> {
-  const files = await listFiles(workspaceRoot, directory);
+export async function searchText(
+  workspaceRoot: string,
+  query: string,
+  directory: string,
+  limits: FileSearchLimits = {}
+): Promise<Array<Record<string, JsonValue>>> {
+  const maxMatches = limits.maxMatches ?? 100;
+  const files = await listFiles(workspaceRoot, directory, undefined, limits);
   const matches: Array<Record<string, JsonValue>> = [];
 
   for (const relativePath of files) {
+    if (matches.length >= maxMatches) break;
     const fullPath = assertInsideWorkspace(workspaceRoot, relativePath);
     const content = await readFile(fullPath, 'utf8');
     const lines = content.split(/\r?\n/);
     lines.forEach((line, index) => {
-      if (line.includes(query)) {
+      if (matches.length < maxMatches && line.includes(query)) {
         matches.push({
           filepath: relativePath,
           line: index + 1,
@@ -59,7 +78,16 @@ export async function searchText(workspaceRoot: string, query: string, directory
     });
   }
 
-  return matches.slice(0, 100);
+  return matches.slice(0, maxMatches);
+}
+
+export interface OpenAIToolRuntimeEvent {
+  type: 'tool_call' | 'tool_result';
+  tool: string;
+  args?: unknown;
+  result?: unknown;
+  success?: boolean;
+  durationMs?: number;
 }
 
 /**
@@ -75,4 +103,11 @@ export interface DevelopmentToolOptions {
   terminalService?: any;
   ragService?: any;
   gitService?: any;
+  runtimeLimits?: {
+    maxFileLines: number;
+    maxListFiles: number;
+    maxSearchMatches: number;
+    maxRagResults: number;
+  };
+  onToolEvent?: (event: OpenAIToolRuntimeEvent) => void;
 }

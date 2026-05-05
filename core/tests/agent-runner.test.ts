@@ -27,6 +27,7 @@ describe('AgentRunner', () => {
       'message',
       'error',
       'complete',
+      'llm',
     ];
 
     for (const type of eventTypes) {

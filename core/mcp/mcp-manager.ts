@@ -1,7 +1,7 @@
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
-import { Tool as MCPTool } from "@modelcontextprotocol/sdk/types.js";
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
+import { Tool as MCPTool } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs/promises';
 import { UnifiedLogger } from '../observability/logger.js';
 import { ToolDefinition, ToolSchema } from '../types/index.js';
@@ -10,15 +10,23 @@ export interface MCPServerConfig {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
-  url?: string; // Para SSE
+  url?: string;
 }
 
 export interface MCPConfig {
   mcpServers: Record<string, MCPServerConfig>;
 }
 
+export interface MCPServerStatus {
+  name: string;
+  connected: boolean;
+  transport: 'stdio' | 'sse' | 'unknown';
+  error?: string;
+}
+
 export class MCPManager {
   private clients: Map<string, Client> = new Map();
+  private errors: Map<string, string> = new Map();
   private config: MCPConfig | null = null;
 
   constructor(private logger?: UnifiedLogger) {}
@@ -27,13 +35,14 @@ export class MCPManager {
     try {
       const content = await fs.readFile(configPath, 'utf-8');
       this.config = JSON.parse(content);
+      this.errors.clear();
       this.logger?.logEvent('system', 'mcp_config_loaded', { path: configPath });
     } catch (error: any) {
       if (error.code === 'ENOENT') {
-        this.logger?.logEvent('system', 'mcp_config_missing', { message: 'Nenhum arquivo mcp-servers.json encontrado. Pulando MCP.' });
+        this.logger?.logEvent('system', 'mcp_config_missing', { message: 'No mcp-servers.json found. Skipping MCP.' });
         this.config = { mcpServers: {} };
       } else {
-        throw new Error(`Falha ao carregar mcp-servers.json: ${error.message}`);
+        throw new Error(`Failed to load mcp-servers.json: ${error.message}`);
       }
     }
   }
@@ -45,7 +54,6 @@ export class MCPManager {
     }
   }
 
-  /** Lazy-connect to a specific MCP server on first use */
   async connectServer(name: string): Promise<void> {
     if (!this.config || this.clients.has(name)) return;
     const serverConfig = this.config.mcpServers[name];
@@ -71,24 +79,45 @@ export class MCPManager {
           env: { ...env, NODE_NO_WARNINGS: '1' },
         });
       } else {
+        this.errors.set(name, 'MCP server config has no command or url.');
         return;
       }
 
       const client = new Client(
-        { name: "bflow-agent-client", version: "1.0.0" },
+        { name: 'bflow-agent-client', version: '1.0.0' },
         { capabilities: {} }
       );
       await client.connect(transport);
       this.clients.set(name, client);
+      this.errors.delete(name);
     } catch (error: any) {
-      // Silently skip — connector may not have deps installed
+      this.errors.set(name, error?.message || String(error));
     }
   }
 
-  /** Get available tool names WITHOUT connecting (cheap) */
   getAvailableToolNames(): string[] {
     if (!this.config) return [];
     return Object.keys(this.config.mcpServers);
+  }
+
+  getServerStatuses(): MCPServerStatus[] {
+    if (!this.config) return [];
+    return Object.entries(this.config.mcpServers).map(([name, serverConfig]) => ({
+      name,
+      connected: this.clients.has(name),
+      transport: serverConfig.url ? 'sse' : serverConfig.command ? 'stdio' : 'unknown',
+      error: this.errors.get(name),
+    }));
+  }
+
+  async disconnectServer(name: string): Promise<void> {
+    const client = this.clients.get(name);
+    if (!client) return;
+    try {
+      await client.close();
+    } finally {
+      this.clients.delete(name);
+    }
   }
 
   async getAllTools(): Promise<ToolDefinition[]> {
@@ -96,7 +125,6 @@ export class MCPManager {
 
     for (const serverName of Object.keys(this.config?.mcpServers || {})) {
       try {
-        // Lazy connect
         if (!this.clients.has(serverName)) {
           await this.connectServer(serverName);
         }
@@ -108,7 +136,7 @@ export class MCPManager {
           allTools.push(this.mapMCPToolToDefinition(serverName, client, mcpTool));
         }
       } catch (error: any) {
-        // Silently skip unavailable servers
+        this.errors.set(serverName, error?.message || String(error));
       }
     }
 
@@ -116,20 +144,19 @@ export class MCPManager {
   }
 
   private mapMCPToolToDefinition(serverName: string, client: Client, mcpTool: MCPTool): ToolDefinition {
-    // Prefixamos o nome da tool para evitar colisões (ex: github_create_issue)
     const prefixedName = `${serverName}_${mcpTool.name}`;
 
     const schema: ToolSchema = {
       name: prefixedName,
-      summary: mcpTool.description || `Ferramenta do servidor MCP ${serverName}`,
-      description: mcpTool.description || `Invoca ${mcpTool.name} no servidor ${serverName}`,
+      summary: mcpTool.description || `Tool from MCP server ${serverName}`,
+      description: mcpTool.description || `Invokes ${mcpTool.name} on server ${serverName}`,
       parameters: mcpTool.inputSchema as any,
-      whenToUse: `Use para interagir com ${serverName} via ${mcpTool.name}.`,
-      expectedOutput: "Resultado da execução no servidor MCP.",
-      failureModes: ["Timeout de conexão", "Argumentos inválidos", "Erro no servidor remoto"],
+      whenToUse: `Use to interact with ${serverName} via ${mcpTool.name}.`,
+      expectedOutput: 'Server execution result.',
+      failureModes: ['Connection timeout', 'Invalid arguments', 'Remote server error'],
       recoverableErrors: [],
       examples: [],
-      dangerous: true // Por segurança, ferramentas externas são marcadas como perigosas para HITL
+      dangerous: true,
     };
 
     return {
@@ -137,10 +164,10 @@ export class MCPManager {
       execute: async (args: any, _context: any) => {
         const result = await client.callTool({
           name: mcpTool.name,
-          arguments: args
+          arguments: args,
         });
         return result;
-      }
+      },
     };
   }
 
@@ -148,8 +175,8 @@ export class MCPManager {
     for (const client of this.clients.values()) {
       try {
         await client.close();
-      } catch (error: any) {
-        // Ignorar erros no fechamento
+      } catch {
+        // Ignore shutdown errors.
       }
     }
     this.clients.clear();

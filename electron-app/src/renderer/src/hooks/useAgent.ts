@@ -88,14 +88,21 @@ export function useAgent(api: any) {
           setToolCalls(newCalls)
         }
       } else if (event.type === 'tool_result') {
+         let parsedResult: any = event.content
+         try {
+           const parsed = typeof event.content === 'string' ? JSON.parse(event.content) : event.content
+           parsedResult = parsed?.result ?? parsed
+         } catch {
+           parsedResult = event.content
+         }
          // Update the last pending tool call
          const newCalls = [...stateRef.current.toolCalls]
          const lastPendingIndex = newCalls.map(c => c.status).lastIndexOf('pending')
          if (lastPendingIndex >= 0) {
            newCalls[lastPendingIndex] = {
              ...newCalls[lastPendingIndex],
-             status: 'success',
-             result: event.content
+             status: parsedResult?.error ? 'error' : 'success',
+             result: parsedResult
            }
          }
          stateRef.current.toolCalls = newCalls

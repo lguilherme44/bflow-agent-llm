@@ -4,14 +4,24 @@ import { runOpenAIAgent, OpenAIAgentConfig } from './agent/openai-agents/orchest
 export interface AgentRunConfig {
   task: string;
   workspaceRoot: string;
+  provider?: string;
   model: string;
   baseUrl: string;
   apiKey?: string;
   maxTurns: number;
+  runtimeProfile?: string;
+  maxOutputTokens?: number;
+  maxInputChars?: number;
+  maxToolOutputChars?: number;
+  maxFileLines?: number;
+  maxListFiles?: number;
+  maxSearchMatches?: number;
+  maxRagResults?: number;
+  temperature?: number;
 }
 
 export interface AgentEvent {
-  type: 'thinking' | 'tool_call' | 'tool_result' | 'message' | 'error' | 'complete';
+  type: 'thinking' | 'tool_call' | 'tool_result' | 'message' | 'error' | 'complete' | 'llm';
   content: string;
   metadata?: Record<string, any>;
 }
@@ -42,19 +52,22 @@ export class AgentRunner extends EventEmitter {
 
     const orchestratorConfig: OpenAIAgentConfig = {
       workspaceRoot: config.workspaceRoot,
+      provider: config.provider,
       baseUrl: config.baseUrl,
       apiKey: config.apiKey,
       model: config.model,
       maxTurns: config.maxTurns,
-      onUpdate: (update) => {
-        if (update.role === 'system') {
-          pushEvent({ type: 'thinking', content: update.content });
-        } else if (update.role === 'assistant') {
-          pushEvent({ type: 'message', content: update.content });
-        } else {
-          pushEvent({ type: 'message', content: `[${update.role}] ${update.content}` });
-        }
-      }
+      runtimeProfile: config.runtimeProfile,
+      maxOutputTokens: config.maxOutputTokens,
+      maxInputChars: config.maxInputChars,
+      maxToolOutputChars: config.maxToolOutputChars,
+      maxFileLines: config.maxFileLines,
+      maxListFiles: config.maxListFiles,
+      maxSearchMatches: config.maxSearchMatches,
+      maxRagResults: config.maxRagResults,
+      temperature: config.temperature,
+      signal: this.abortController.signal,
+      onEvent: (event) => pushEvent(event as AgentEvent),
     };
 
     // Run the agent in the background
