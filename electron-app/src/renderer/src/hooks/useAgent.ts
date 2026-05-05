@@ -40,7 +40,9 @@ export function useAgent(api: any) {
             content: event.content,
             timestamp: Date.now()
           }
-          setMessages((prev) => [...prev, assistantMsg])
+          const newMsgs = [...stateRef.current.messages, assistantMsg]
+          stateRef.current.messages = newMsgs
+          setMessages(newMsgs)
         }
         
         if (event.type === 'complete' || event.type === 'error') {
@@ -64,37 +66,40 @@ export function useAgent(api: any) {
       } else if (event.type === 'tool_call') {
         try {
           const parsed = typeof event.content === 'string' ? JSON.parse(event.content) : event.content
-          setToolCalls((prev) => [...prev, {
+          const newCalls = [...stateRef.current.toolCalls, {
             id: crypto.randomUUID(),
             tool: parsed.tool || 'unknown_tool',
             args: parsed.arguments || {},
-            status: 'pending',
+            status: 'pending' as const,
             timestamp: Date.now()
-          }])
+          }]
+          stateRef.current.toolCalls = newCalls
+          setToolCalls(newCalls)
         } catch (e) {
           // fallback
-          setToolCalls((prev) => [...prev, {
+          const newCalls = [...stateRef.current.toolCalls, {
             id: crypto.randomUUID(),
             tool: 'tool_call',
             args: { raw: event.content },
-            status: 'pending',
+            status: 'pending' as const,
             timestamp: Date.now()
-          }])
+          }]
+          stateRef.current.toolCalls = newCalls
+          setToolCalls(newCalls)
         }
       } else if (event.type === 'tool_result') {
          // Update the last pending tool call
-         setToolCalls((prev) => {
-           const newCalls = [...prev]
-           const lastPendingIndex = newCalls.map(c => c.status).lastIndexOf('pending')
-           if (lastPendingIndex >= 0) {
-             newCalls[lastPendingIndex] = {
-               ...newCalls[lastPendingIndex],
-               status: 'success',
-               result: event.content
-             }
+         const newCalls = [...stateRef.current.toolCalls]
+         const lastPendingIndex = newCalls.map(c => c.status).lastIndexOf('pending')
+         if (lastPendingIndex >= 0) {
+           newCalls[lastPendingIndex] = {
+             ...newCalls[lastPendingIndex],
+             status: 'success',
+             result: event.content
            }
-           return newCalls
-         })
+         }
+         stateRef.current.toolCalls = newCalls
+         setToolCalls(newCalls)
       }
     })
 
@@ -109,14 +114,17 @@ export function useAgent(api: any) {
       timestamp: Date.now()
     }
 
-    setMessages((prev) => {
-      const newMsgs = [...prev, userMsg]
-      // Set title on first message
-      if (newMsgs.length === 1) {
-        setSessionTitle(task.slice(0, 40) + (task.length > 40 ? '...' : ''))
-      }
-      return newMsgs
-    })
+    const newMsgs = [...stateRef.current.messages, userMsg]
+    stateRef.current.messages = newMsgs
+
+    // Set title on first message
+    if (newMsgs.length === 1) {
+      const title = task.slice(0, 40) + (task.length > 40 ? '...' : '')
+      stateRef.current.sessionTitle = title
+      setSessionTitle(title)
+    }
+    
+    setMessages(newMsgs)
     
     // Do NOT clear toolCalls if we are continuing a conversation
     setThinking(null)
